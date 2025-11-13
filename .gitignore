@@ -1,0 +1,21 @@
+# Logs
+*.log
+npm-debug.log*
+
+# Dependencies
+node_modules/
+
+# Compiled files
+main.js
+*.js.map
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.vscode/
+.idea/
+
+# Build files
+dist/
