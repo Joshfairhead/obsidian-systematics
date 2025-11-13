@@ -50,27 +50,27 @@ export const K5: GraphGeometry = {
     order: 5,
     vertices: [
         { index: 0, label: "Purpose", x: 1.0, y: 1.0 },
-        { index: 1, label: "Higher Potential", x: 0.5, y: 0.5 },
+        { index: 1, label: "Higher Potential", x: -0.3, y: 0.5 },
         { index: 2, label: "Quintessence", x: -1.0, y: 0.0 },
-        { index: 3, label: "Lower Potential", x: 0.5, y: -0.5 },
+        { index: 3, label: "Lower Potential", x: -0.3, y: -0.5 },
         { index: 4, label: "Source", x: 1.0, y: -1.0 }
     ],
     edges: generateCompleteGraphEdges(5)
 };
 
 /**
- * K6 - Hexagon
+ * K6 - Hexagon (symmetrical)
  */
 export const K6: GraphGeometry = {
     name: "K6",
     order: 6,
     vertices: [
-        { index: 0, label: "Top left", x: -0.5, y: 0.86602540378 },
-        { index: 1, label: "Top tip", x: 0.0, y: 1.0 },
-        { index: 2, label: "Top right", x: 0.5, y: 0.86602540378 },
-        { index: 3, label: "Bottom right", x: 1.0, y: 0.0 },
-        { index: 4, label: "Bottom", x: 0.0, y: -1.0 },
-        { index: 5, label: "Bottom left", x: -1.0, y: 0.0 }
+        { index: 0, label: "Top", x: 0.0, y: 1.0 },
+        { index: 1, label: "Top right", x: 0.86602540378, y: 0.5 },
+        { index: 2, label: "Bottom right", x: 0.86602540378, y: -0.5 },
+        { index: 3, label: "Bottom", x: 0.0, y: -1.0 },
+        { index: 4, label: "Bottom left", x: -0.86602540378, y: -0.5 },
+        { index: 5, label: "Top left", x: -0.86602540378, y: 0.5 }
     ],
     edges: generateCompleteGraphEdges(6)
 };
