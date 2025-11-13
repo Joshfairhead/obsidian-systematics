@@ -35,6 +35,8 @@ export interface NodeLabelSettings {
     [nodeIndex: number]: {
         label: string;
         noteFile: string;
+        labelOffsetX?: number; // Custom X offset for label position
+        labelOffsetY?: number; // Custom Y offset for label position
     };
 }
 

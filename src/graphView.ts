@@ -15,6 +15,12 @@ export class SystematicsGraphView extends ItemView {
     offsetY: number = 0;
     hoveredVertex: number | null = null;
     selectedVertex: number | null = null;
+    hoveredLabel: number | null = null;
+    draggingLabel: number | null = null;
+    dragStartX: number = 0;
+    dragStartY: number = 0;
+    dragOffsetX: number = 0;
+    dragOffsetY: number = 0;
 
     constructor(leaf: WorkspaceLeaf, plugin: SystematicsPlugin) {
         super(leaf);
@@ -66,7 +72,7 @@ export class SystematicsGraphView extends ItemView {
         // Instructions
         const instructions = controlsDiv.createDiv({ cls: 'systematics-instructions' });
         instructions.createEl('p', {
-            text: 'Click on a node to assign a label and link it to a note.'
+            text: 'Click nodes to label/link. Drag labels to reposition them.'
         });
 
         // Canvas
@@ -79,6 +85,8 @@ export class SystematicsGraphView extends ItemView {
 
         // Event listeners
         this.canvas.addEventListener('mousemove', this.onMouseMove.bind(this));
+        this.canvas.addEventListener('mousedown', this.onMouseDown.bind(this));
+        this.canvas.addEventListener('mouseup', this.onMouseUp.bind(this));
         this.canvas.addEventListener('click', this.onCanvasClick.bind(this));
 
         // Load initial graph
@@ -198,6 +206,9 @@ export class SystematicsGraphView extends ItemView {
             this.ctx.stroke();
         }
 
+        // Set font BEFORE wrapping text (fixes line break bug)
+        this.ctx.font = isHovered ? 'bold 14px sans-serif' : '12px sans-serif';
+
         // Draw label positioned radially outside the graph
         const displayLabel = customLabel?.label || vertex.label;
         const lines = this.wrapText(displayLabel, 120);
@@ -208,33 +219,47 @@ export class SystematicsGraphView extends ItemView {
         const dy = y - this.offsetY;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
-        // Position text outside the graph (50px beyond the node)
+        // Position text outside the graph (50px beyond the node) with custom offset
+        const baseOffsetX = customLabel?.labelOffsetX || 0;
+        const baseOffsetY = customLabel?.labelOffsetY || 0;
         const labelDistance = distance + radius + 50;
-        const labelX = this.offsetX + (dx / distance) * labelDistance;
-        const labelY = this.offsetY + (dy / distance) * labelDistance;
+        const labelX = this.offsetX + (dx / distance) * labelDistance + baseOffsetX;
+        const labelY = this.offsetY + (dy / distance) * labelDistance + baseOffsetY;
 
-        this.ctx.font = isHovered ? 'bold 14px sans-serif' : '12px sans-serif';
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
 
         // Draw text with background for better visibility
         const totalHeight = lines.length * lineHeight;
         const startY = labelY - totalHeight / 2;
+        const isLabelHovered = this.hoveredLabel === vertex.index;
 
         lines.forEach((line, index) => {
             const textY = startY + (index * lineHeight) + lineHeight / 2;
             const metrics = this.ctx.measureText(line);
             const textWidth = metrics.width;
-            const padding = 4;
+            const padding = isLabelHovered ? 6 : 4;
 
-            // Draw background rectangle
-            this.ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            // Draw background rectangle with hover effect
+            this.ctx.fillStyle = isLabelHovered ? 'rgba(230, 240, 255, 0.95)' : 'rgba(255, 255, 255, 0.9)';
             this.ctx.fillRect(
                 labelX - textWidth / 2 - padding,
-                textY - lineHeight / 2,
+                textY - lineHeight / 2 - 1,
                 textWidth + padding * 2,
-                lineHeight
+                lineHeight + 2
             );
+
+            // Add border when hovered
+            if (isLabelHovered) {
+                this.ctx.strokeStyle = '#3b82f6';
+                this.ctx.lineWidth = 1;
+                this.ctx.strokeRect(
+                    labelX - textWidth / 2 - padding,
+                    textY - lineHeight / 2 - 1,
+                    textWidth + padding * 2,
+                    lineHeight + 2
+                );
+            }
 
             // Draw text in black
             this.ctx.fillStyle = '#000000';
@@ -271,24 +296,129 @@ export class SystematicsGraphView extends ItemView {
         const mouseX = event.clientX - rect.left;
         const mouseY = event.clientY - rect.top;
 
-        let foundVertex = null;
+        // If dragging a label, update its position
+        if (this.draggingLabel !== null) {
+            const graphKey = `K${this.currentGraph.order}`;
+            const vertex = this.currentGraph.vertices[this.draggingLabel];
 
+            if (!this.plugin.settings.nodeLabelSettings[graphKey]) {
+                this.plugin.settings.nodeLabelSettings[graphKey] = {};
+            }
+            if (!this.plugin.settings.nodeLabelSettings[graphKey][this.draggingLabel]) {
+                this.plugin.settings.nodeLabelSettings[graphKey][this.draggingLabel] = {
+                    label: vertex.label,
+                    noteFile: '',
+                    labelOffsetX: 0,
+                    labelOffsetY: 0
+                };
+            }
+
+            const dx = mouseX - this.dragStartX;
+            const dy = mouseY - this.dragStartY;
+            this.plugin.settings.nodeLabelSettings[graphKey][this.draggingLabel].labelOffsetX = this.dragOffsetX + dx;
+            this.plugin.settings.nodeLabelSettings[graphKey][this.draggingLabel].labelOffsetY = this.dragOffsetY + dy;
+
+            this.canvas.style.cursor = 'grabbing';
+            this.draw();
+            return;
+        }
+
+        // Check for label hover
+        let foundLabel = null;
         for (let i = 0; i < this.currentGraph.vertices.length; i++) {
-            const vertex = this.currentGraph.vertices[i];
-            const x = this.offsetX + vertex.x * this.scale;
-            const y = this.offsetY - vertex.y * this.scale;
-            const distance = Math.sqrt((mouseX - x) ** 2 + (mouseY - y) ** 2);
+            const labelPos = this.getLabelPosition(i);
+            if (!labelPos) continue;
 
-            if (distance <= 12) {
-                foundVertex = i;
+            const distance = Math.sqrt((mouseX - labelPos.x) ** 2 + (mouseY - labelPos.y) ** 2);
+            if (distance <= 30) { // Larger hit area for labels
+                foundLabel = i;
                 break;
             }
         }
 
-        if (foundVertex !== this.hoveredVertex) {
-            this.hoveredVertex = foundVertex;
-            this.canvas.style.cursor = foundVertex !== null ? 'pointer' : 'default';
+        // Check for vertex hover if no label is hovered
+        let foundVertex = null;
+        if (foundLabel === null) {
+            for (let i = 0; i < this.currentGraph.vertices.length; i++) {
+                const vertex = this.currentGraph.vertices[i];
+                const x = this.offsetX + vertex.x * this.scale;
+                const y = this.offsetY - vertex.y * this.scale;
+                const distance = Math.sqrt((mouseX - x) ** 2 + (mouseY - y) ** 2);
+
+                if (distance <= 12) {
+                    foundVertex = i;
+                    break;
+                }
+            }
+        }
+
+        // Update hover states
+        const needsRedraw = (foundVertex !== this.hoveredVertex) || (foundLabel !== this.hoveredLabel);
+        this.hoveredVertex = foundVertex;
+        this.hoveredLabel = foundLabel;
+
+        // Update cursor
+        if (foundLabel !== null) {
+            this.canvas.style.cursor = 'grab';
+        } else if (foundVertex !== null) {
+            this.canvas.style.cursor = 'pointer';
+        } else {
+            this.canvas.style.cursor = 'default';
+        }
+
+        if (needsRedraw) {
             this.draw();
+        }
+    }
+
+    getLabelPosition(vertexIndex: number): { x: number, y: number } | null {
+        const vertex = this.currentGraph.vertices[vertexIndex];
+        const x = this.offsetX + vertex.x * this.scale;
+        const y = this.offsetY - vertex.y * this.scale;
+        const radius = 10;
+
+        const graphKey = `K${this.currentGraph.order}`;
+        const customLabel = this.plugin.settings.nodeLabelSettings[graphKey]?.[vertexIndex];
+
+        const dx = x - this.offsetX;
+        const dy = y - this.offsetY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        const baseOffsetX = customLabel?.labelOffsetX || 0;
+        const baseOffsetY = customLabel?.labelOffsetY || 0;
+        const labelDistance = distance + radius + 50;
+        const labelX = this.offsetX + (dx / distance) * labelDistance + baseOffsetX;
+        const labelY = this.offsetY + (dy / distance) * labelDistance + baseOffsetY;
+
+        return { x: labelX, y: labelY };
+    }
+
+    onMouseDown(event: MouseEvent) {
+        const rect = this.canvas.getBoundingClientRect();
+        const mouseX = event.clientX - rect.left;
+        const mouseY = event.clientY - rect.top;
+
+        // Check if clicking on a label
+        if (this.hoveredLabel !== null) {
+            this.draggingLabel = this.hoveredLabel;
+            this.dragStartX = mouseX;
+            this.dragStartY = mouseY;
+
+            const graphKey = `K${this.currentGraph.order}`;
+            const currentSettings = this.plugin.settings.nodeLabelSettings[graphKey]?.[this.draggingLabel];
+            this.dragOffsetX = currentSettings?.labelOffsetX || 0;
+            this.dragOffsetY = currentSettings?.labelOffsetY || 0;
+
+            event.preventDefault();
+        }
+    }
+
+    onMouseUp(event: MouseEvent) {
+        if (this.draggingLabel !== null) {
+            // Save the new position
+            this.plugin.saveSettings();
+            this.draggingLabel = null;
+            this.canvas.style.cursor = 'grab';
         }
     }
 
@@ -379,6 +509,23 @@ export class SystematicsGraphView extends ItemView {
                         const file = this.app.vault.getAbstractFileByPath(currentSettings.noteFile);
                         if (file instanceof TFile) {
                             await this.app.workspace.getLeaf(false).openFile(file);
+                        }
+                    });
+            });
+        }
+
+        // Add reset position option if label has been moved
+        if (currentSettings?.labelOffsetX !== undefined || currentSettings?.labelOffsetY !== undefined) {
+            menu.addItem((item) => {
+                item
+                    .setTitle("Reset label position")
+                    .setIcon("reset")
+                    .onClick(async () => {
+                        if (this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex]) {
+                            this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex].labelOffsetX = 0;
+                            this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex].labelOffsetY = 0;
+                            await this.plugin.saveSettings();
+                            this.draw();
                         }
                     });
             });
