@@ -1,6 +1,7 @@
 import { ItemView, WorkspaceLeaf, TFile, Menu } from 'obsidian';
 import { GraphGeometry, Vertex } from './types';
 import SystematicsPlugin from '../main';
+import { TextInputModal, FileSuggestModal } from './modals';
 
 export const VIEW_TYPE_SYSTEMATICS = "systematics-graph-view";
 
@@ -197,19 +198,31 @@ export class SystematicsGraphView extends ItemView {
             this.ctx.stroke();
         }
 
-        // Draw label outside the graph with background for visibility
+        // Draw label positioned radially outside the graph
         const displayLabel = customLabel?.label || vertex.label;
         const lines = this.wrapText(displayLabel, 120);
         const lineHeight = 18;
-        const startY = y + radius + 25; // Position text further from node
+
+        // Calculate direction from center to node (for radial positioning)
+        const dx = x - this.offsetX;
+        const dy = y - this.offsetY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        // Position text outside the graph (50px beyond the node)
+        const labelDistance = distance + radius + 50;
+        const labelX = this.offsetX + (dx / distance) * labelDistance;
+        const labelY = this.offsetY + (dy / distance) * labelDistance;
 
         this.ctx.font = isHovered ? 'bold 14px sans-serif' : '12px sans-serif';
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
 
         // Draw text with background for better visibility
+        const totalHeight = lines.length * lineHeight;
+        const startY = labelY - totalHeight / 2;
+
         lines.forEach((line, index) => {
-            const textY = startY + (index * lineHeight);
+            const textY = startY + (index * lineHeight) + lineHeight / 2;
             const metrics = this.ctx.measureText(line);
             const textWidth = metrics.width;
             const padding = 4;
@@ -217,7 +230,7 @@ export class SystematicsGraphView extends ItemView {
             // Draw background rectangle
             this.ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
             this.ctx.fillRect(
-                x - textWidth / 2 - padding,
+                labelX - textWidth / 2 - padding,
                 textY - lineHeight / 2,
                 textWidth + padding * 2,
                 lineHeight
@@ -225,7 +238,7 @@ export class SystematicsGraphView extends ItemView {
 
             // Draw text in black
             this.ctx.fillStyle = '#000000';
-            this.ctx.fillText(line, x, textY);
+            this.ctx.fillText(line, labelX, textY);
         });
     }
 
@@ -298,26 +311,29 @@ export class SystematicsGraphView extends ItemView {
             item
                 .setTitle("Set label")
                 .setIcon("tag")
-                .onClick(async () => {
-                    const newLabel = prompt(
-                        `Enter label for node ${vertexIndex}:`,
-                        currentSettings?.label || vertex.label
-                    );
-
-                    if (newLabel !== null) {
-                        if (!this.plugin.settings.nodeLabelSettings[graphKey]) {
-                            this.plugin.settings.nodeLabelSettings[graphKey] = {};
+                .onClick(() => {
+                    new TextInputModal(
+                        this.app,
+                        `Set label for node ${vertexIndex}`,
+                        "Enter node label",
+                        currentSettings?.label || vertex.label,
+                        async (newLabel) => {
+                            if (newLabel && newLabel.trim()) {
+                                if (!this.plugin.settings.nodeLabelSettings[graphKey]) {
+                                    this.plugin.settings.nodeLabelSettings[graphKey] = {};
+                                }
+                                if (!this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex]) {
+                                    this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex] = {
+                                        label: vertex.label,
+                                        noteFile: ''
+                                    };
+                                }
+                                this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex].label = newLabel.trim();
+                                await this.plugin.saveSettings();
+                                this.draw();
+                            }
                         }
-                        if (!this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex]) {
-                            this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex] = {
-                                label: vertex.label,
-                                noteFile: ''
-                            };
-                        }
-                        this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex].label = newLabel;
-                        await this.plugin.saveSettings();
-                        this.draw();
-                    }
+                    ).open();
                 });
         });
 
@@ -325,29 +341,32 @@ export class SystematicsGraphView extends ItemView {
             item
                 .setTitle("Link to note")
                 .setIcon("link")
-                .onClick(async () => {
+                .onClick(() => {
                     const files = this.app.vault.getMarkdownFiles();
                     const fileNames = files.map(f => f.path);
 
-                    const selectedFile = prompt(
-                        `Enter note path to link (e.g., "folder/note.md"):\n\nAvailable notes:\n${fileNames.slice(0, 10).join('\n')}${fileNames.length > 10 ? '\n...' : ''}`,
-                        currentSettings?.noteFile || ''
-                    );
-
-                    if (selectedFile !== null) {
-                        if (!this.plugin.settings.nodeLabelSettings[graphKey]) {
-                            this.plugin.settings.nodeLabelSettings[graphKey] = {};
+                    new FileSuggestModal(
+                        this.app,
+                        `Link node ${vertexIndex} to note`,
+                        fileNames,
+                        currentSettings?.noteFile || '',
+                        async (selectedFile) => {
+                            if (selectedFile && selectedFile.trim()) {
+                                if (!this.plugin.settings.nodeLabelSettings[graphKey]) {
+                                    this.plugin.settings.nodeLabelSettings[graphKey] = {};
+                                }
+                                if (!this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex]) {
+                                    this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex] = {
+                                        label: vertex.label,
+                                        noteFile: ''
+                                    };
+                                }
+                                this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex].noteFile = selectedFile.trim();
+                                await this.plugin.saveSettings();
+                                this.draw();
+                            }
                         }
-                        if (!this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex]) {
-                            this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex] = {
-                                label: vertex.label,
-                                noteFile: ''
-                            };
-                        }
-                        this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex].noteFile = selectedFile;
-                        await this.plugin.saveSettings();
-                        this.draw();
-                    }
+                    ).open();
                 });
         });
 

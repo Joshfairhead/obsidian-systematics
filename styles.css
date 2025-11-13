@@ -68,6 +68,49 @@
     background-color: #ffffff;
 }
 
+/* Modal styles */
+.systematics-file-list {
+    margin: 20px 0;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.systematics-file-list h4 {
+    margin: 0 0 10px 0;
+    font-size: 0.9em;
+    color: var(--text-muted);
+}
+
+.systematics-file-items {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.systematics-file-items li {
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.1s;
+}
+
+.systematics-file-items li:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+.systematics-file-item {
+    color: var(--text-normal);
+    text-decoration: none;
+    font-size: 0.9em;
+}
+
+.systematics-file-more {
+    margin-top: 10px;
+    font-size: 0.85em;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
 /* Responsive design */
 @media (max-width: 768px) {
     .systematics-view-container {
