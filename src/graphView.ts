@@ -206,12 +206,15 @@ export class SystematicsGraphView extends ItemView {
             this.ctx.stroke();
         }
 
-        // Set font BEFORE wrapping text (fixes line break bug)
-        this.ctx.font = isHovered ? 'bold 12px sans-serif' : '12px sans-serif';
+        // Always use bold font for measuring to ensure consistent wrapping
+        this.ctx.font = 'bold 12px sans-serif';
 
         // Draw label positioned radially outside the graph
         const displayLabel = customLabel?.label || vertex.label;
         const lines = this.wrapText(displayLabel, 120);
+
+        // Set actual font based on hover state
+        this.ctx.font = isHovered ? 'bold 12px sans-serif' : '12px sans-serif';
         const lineHeight = 18;
 
         // Calculate direction from center to node (for radial positioning)
