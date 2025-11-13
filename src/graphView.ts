@@ -207,7 +207,7 @@ export class SystematicsGraphView extends ItemView {
         }
 
         // Set font BEFORE wrapping text (fixes line break bug)
-        this.ctx.font = isHovered ? 'bold 14px sans-serif' : '12px sans-serif';
+        this.ctx.font = isHovered ? 'bold 12px sans-serif' : '12px sans-serif';
 
         // Draw label positioned radially outside the graph
         const displayLabel = customLabel?.label || vertex.label;
