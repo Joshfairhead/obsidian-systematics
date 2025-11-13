@@ -109,9 +109,9 @@ export class SystematicsGraphView extends ItemView {
         this.offsetX = displayWidth / 2;
         this.offsetY = displayHeight / 2;
 
-        // Adaptive scale based on canvas size
+        // Adaptive scale based on canvas size with extra margin for labels
         const minDimension = Math.min(displayWidth, displayHeight);
-        this.scale = minDimension / 3.5;
+        this.scale = (minDimension - 100) / 3; // More conservative scale for label space
 
         this.draw();
     }
@@ -197,20 +197,35 @@ export class SystematicsGraphView extends ItemView {
             this.ctx.stroke();
         }
 
-        // Draw label with theme-aware color
-        const textColor = this.getThemeColor('--text-normal') || '#000000';
-        this.ctx.fillStyle = textColor;
-        this.ctx.font = isHovered ? 'bold 13px sans-serif' : '12px sans-serif';
+        // Draw label outside the graph with background for visibility
+        const displayLabel = customLabel?.label || vertex.label;
+        const lines = this.wrapText(displayLabel, 120);
+        const lineHeight = 18;
+        const startY = y + radius + 25; // Position text further from node
+
+        this.ctx.font = isHovered ? 'bold 14px sans-serif' : '12px sans-serif';
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
 
-        const displayLabel = customLabel?.label || vertex.label;
-        const lines = this.wrapText(displayLabel, 120);
-        const lineHeight = 16;
-        const startY = y + radius + 18;
-
+        // Draw text with background for better visibility
         lines.forEach((line, index) => {
-            this.ctx.fillText(line, x, startY + (index * lineHeight));
+            const textY = startY + (index * lineHeight);
+            const metrics = this.ctx.measureText(line);
+            const textWidth = metrics.width;
+            const padding = 4;
+
+            // Draw background rectangle
+            this.ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            this.ctx.fillRect(
+                x - textWidth / 2 - padding,
+                textY - lineHeight / 2,
+                textWidth + padding * 2,
+                lineHeight
+            );
+
+            // Draw text in black
+            this.ctx.fillStyle = '#000000';
+            this.ctx.fillText(line, x, textY);
         });
     }
 
