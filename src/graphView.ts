@@ -87,10 +87,32 @@ export class SystematicsGraphView extends ItemView {
     resizeCanvas() {
         const container = this.containerEl.children[1];
         const rect = container.getBoundingClientRect();
-        this.canvas.width = rect.width - 40;
-        this.canvas.height = rect.height - 120;
-        this.offsetX = this.canvas.width / 2;
-        this.offsetY = this.canvas.height / 2;
+
+        // Get the actual size we want
+        const displayWidth = Math.max(rect.width - 40, 400);
+        const displayHeight = Math.max(rect.height - 140, 400);
+
+        // Account for device pixel ratio for crisp rendering
+        const dpr = window.devicePixelRatio || 1;
+
+        // Setting width/height resets the canvas, including transforms
+        this.canvas.width = displayWidth * dpr;
+        this.canvas.height = displayHeight * dpr;
+        this.canvas.style.width = displayWidth + 'px';
+        this.canvas.style.height = displayHeight + 'px';
+
+        // Get fresh context and scale it
+        this.ctx = this.canvas.getContext('2d')!;
+        this.ctx.scale(dpr, dpr);
+
+        // Set offsets based on display size (not canvas size)
+        this.offsetX = displayWidth / 2;
+        this.offsetY = displayHeight / 2;
+
+        // Adaptive scale based on canvas size
+        const minDimension = Math.min(displayWidth, displayHeight);
+        this.scale = minDimension / 3.5;
+
         this.draw();
     }
 
@@ -106,9 +128,12 @@ export class SystematicsGraphView extends ItemView {
         // Clear canvas
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
+        // Get theme colors from CSS variables
+        const edgeColor = this.getThemeColor('--text-muted') || '#888888';
+
         // Draw edges
-        this.ctx.strokeStyle = '#888888';
-        this.ctx.lineWidth = 1;
+        this.ctx.strokeStyle = edgeColor;
+        this.ctx.lineWidth = 1.5;
 
         for (const edge of this.currentGraph.edges) {
             const from = this.currentGraph.vertices[edge.from];
@@ -132,6 +157,12 @@ export class SystematicsGraphView extends ItemView {
         }
     }
 
+    getThemeColor(cssVar: string): string | null {
+        const style = getComputedStyle(document.body);
+        const color = style.getPropertyValue(cssVar).trim();
+        return color || null;
+    }
+
     drawVertex(vertex: Vertex, isHovered: boolean, isSelected: boolean) {
         const x = this.offsetX + vertex.x * this.scale;
         const y = this.offsetY - vertex.y * this.scale;
@@ -146,30 +177,37 @@ export class SystematicsGraphView extends ItemView {
         this.ctx.beginPath();
         this.ctx.arc(x, y, radius, 0, 2 * Math.PI);
 
+        // Better colors that work with both themes
         if (hasNote) {
-            this.ctx.fillStyle = isSelected ? '#4a9eff' : '#5b8ec5';
+            this.ctx.fillStyle = isSelected ? '#3b82f6' : '#60a5fa';
         } else {
-            this.ctx.fillStyle = isSelected ? '#888888' : '#666666';
+            this.ctx.fillStyle = isSelected ? '#6b7280' : '#9ca3af';
         }
 
         this.ctx.fill();
 
+        // Add stroke for better visibility
         if (isHovered || isSelected) {
-            this.ctx.strokeStyle = '#ffffff';
-            this.ctx.lineWidth = 2;
+            this.ctx.strokeStyle = this.getThemeColor('--interactive-accent') || '#3b82f6';
+            this.ctx.lineWidth = 3;
+            this.ctx.stroke();
+        } else {
+            this.ctx.strokeStyle = this.getThemeColor('--background-modifier-border') || '#333333';
+            this.ctx.lineWidth = 1.5;
             this.ctx.stroke();
         }
 
-        // Draw label
-        this.ctx.fillStyle = '#ffffff';
-        this.ctx.font = isHovered ? 'bold 12px sans-serif' : '11px sans-serif';
+        // Draw label with theme-aware color
+        const textColor = this.getThemeColor('--text-normal') || '#000000';
+        this.ctx.fillStyle = textColor;
+        this.ctx.font = isHovered ? 'bold 13px sans-serif' : '12px sans-serif';
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
 
         const displayLabel = customLabel?.label || vertex.label;
-        const lines = this.wrapText(displayLabel, 100);
-        const lineHeight = 14;
-        const startY = y + radius + 15;
+        const lines = this.wrapText(displayLabel, 120);
+        const lineHeight = 16;
+        const startY = y + radius + 18;
 
         lines.forEach((line, index) => {
             this.ctx.fillText(line, x, startY + (index * lineHeight));

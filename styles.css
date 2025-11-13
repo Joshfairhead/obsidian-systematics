@@ -50,10 +50,13 @@
 
 .systematics-canvas {
     flex: 1;
-    border: 1px solid var(--background-modifier-border);
+    min-height: 400px;
+    min-width: 400px;
+    border: 2px solid var(--background-modifier-border);
     border-radius: 8px;
     background-color: var(--background-primary-alt);
     cursor: default;
+    display: block;
 }
 
 /* Dark mode adjustments */
