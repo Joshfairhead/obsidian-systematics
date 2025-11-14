@@ -1,4 +1,4 @@
-import { App, Modal, Setting } from 'obsidian';
+import { App, Modal, Setting, SuggestModal, TFile } from 'obsidian';
 
 export class TextInputModal extends Modal {
     result: string;
@@ -62,91 +62,31 @@ export class TextInputModal extends Modal {
     }
 }
 
-export class FileSuggestModal extends Modal {
-    files: string[];
+export class FileSuggestModal extends SuggestModal<TFile> {
     onSubmit: (result: string) => void;
-    title: string;
-    currentValue: string;
+    files: TFile[];
 
     constructor(
         app: App,
-        title: string,
-        files: string[],
-        currentValue: string,
         onSubmit: (result: string) => void
     ) {
         super(app);
-        this.title = title;
-        this.files = files;
-        this.currentValue = currentValue;
         this.onSubmit = onSubmit;
+        this.files = this.app.vault.getMarkdownFiles();
     }
 
-    onOpen() {
-        const { contentEl } = this;
-
-        contentEl.createEl("h2", { text: this.title });
-
-        let selectedFile = this.currentValue;
-
-        new Setting(contentEl)
-            .setName("Note path")
-            .setDesc("Enter the path to the note (e.g., folder/note.md)")
-            .addText((text) =>
-                text
-                    .setValue(this.currentValue)
-                    .setPlaceholder("folder/note.md")
-                    .onChange((value) => {
-                        selectedFile = value;
-                    })
-            );
-
-        // Show available files
-        const fileListEl = contentEl.createDiv({ cls: 'systematics-file-list' });
-        fileListEl.createEl('h4', { text: 'Available notes:' });
-
-        const listEl = fileListEl.createEl('ul', { cls: 'systematics-file-items' });
-        this.files.slice(0, 20).forEach(file => {
-            const itemEl = listEl.createEl('li');
-            itemEl.createEl('a', {
-                text: file,
-                cls: 'systematics-file-item'
-            });
-            itemEl.addEventListener('click', () => {
-                selectedFile = file;
-                this.close();
-                this.onSubmit(selectedFile);
-            });
-        });
-
-        if (this.files.length > 20) {
-            fileListEl.createEl('p', {
-                text: `...and ${this.files.length - 20} more`,
-                cls: 'systematics-file-more'
-            });
-        }
-
-        new Setting(contentEl)
-            .addButton((btn) =>
-                btn
-                    .setButtonText("Submit")
-                    .setCta()
-                    .onClick(() => {
-                        this.close();
-                        this.onSubmit(selectedFile);
-                    })
-            )
-            .addButton((btn) =>
-                btn
-                    .setButtonText("Cancel")
-                    .onClick(() => {
-                        this.close();
-                    })
-            );
+    getSuggestions(query: string): TFile[] {
+        const lowerQuery = query.toLowerCase();
+        return this.files.filter(file =>
+            file.path.toLowerCase().includes(lowerQuery)
+        );
     }
 
-    onClose() {
-        const { contentEl } = this;
-        contentEl.empty();
+    renderSuggestion(file: TFile, el: HTMLElement): void {
+        el.createEl("div", { text: file.path });
+    }
+
+    onChooseSuggestion(file: TFile, evt: MouseEvent | KeyboardEvent): void {
+        this.onSubmit(file.path);
     }
 }

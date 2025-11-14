@@ -475,14 +475,8 @@ export class SystematicsGraphView extends ItemView {
                 .setTitle("Link to note")
                 .setIcon("link")
                 .onClick(() => {
-                    const files = this.app.vault.getMarkdownFiles();
-                    const fileNames = files.map(f => f.path);
-
                     new FileSuggestModal(
                         this.app,
-                        `Link node ${vertexIndex} to note`,
-                        fileNames,
-                        currentSettings?.noteFile || '',
                         async (selectedFile) => {
                             if (selectedFile && selectedFile.trim()) {
                                 if (!this.plugin.settings.nodeLabelSettings[graphKey]) {
