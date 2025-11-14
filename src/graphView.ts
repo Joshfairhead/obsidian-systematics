@@ -210,7 +210,14 @@ export class SystematicsGraphView extends ItemView {
         this.ctx.font = 'bold 12px sans-serif';
 
         // Draw label positioned radially outside the graph
-        const displayLabel = customLabel?.label || vertex.label;
+        // Priority: custom label > note title (if note is linked) > default vertex label
+        let displayLabel = vertex.label;
+        if (customLabel?.noteFile) {
+            const noteTitle = this.getNoteTitleFromPath(customLabel.noteFile);
+            displayLabel = customLabel.label || noteTitle || vertex.label;
+        } else if (customLabel?.label) {
+            displayLabel = customLabel.label;
+        }
         const lines = this.wrapText(displayLabel, 120);
 
         // Set actual font based on hover state
@@ -489,6 +496,13 @@ export class SystematicsGraphView extends ItemView {
                                     };
                                 }
                                 this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex].noteFile = selectedFile.trim();
+
+                                // Automatically set the label to the note title
+                                const noteTitle = this.getNoteTitleFromPath(selectedFile.trim());
+                                if (noteTitle) {
+                                    this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex].label = noteTitle;
+                                }
+
                                 await this.plugin.saveSettings();
                                 this.draw();
                             }
@@ -529,6 +543,15 @@ export class SystematicsGraphView extends ItemView {
         }
 
         menu.showAtMouseEvent(event);
+    }
+
+    getNoteTitleFromPath(filePath: string): string | null {
+        const file = this.app.vault.getAbstractFileByPath(filePath);
+        if (file instanceof TFile) {
+            // Use the basename (filename without extension) as the title
+            return file.basename;
+        }
+        return null;
     }
 
     async onClose() {
