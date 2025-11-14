@@ -1,6 +1,7 @@
 import { ItemView, WorkspaceLeaf, TFile, Menu } from 'obsidian';
 import { GraphGeometry, Vertex } from './types';
 import SystematicsPlugin from '../main';
+import { TextInputModal, FileSuggestModal } from './modals';
 
 export const VIEW_TYPE_SYSTEMATICS = "systematics-graph-view";
 
@@ -14,6 +15,12 @@ export class SystematicsGraphView extends ItemView {
     offsetY: number = 0;
     hoveredVertex: number | null = null;
     selectedVertex: number | null = null;
+    hoveredLabel: number | null = null;
+    draggingLabel: number | null = null;
+    dragStartX: number = 0;
+    dragStartY: number = 0;
+    dragOffsetX: number = 0;
+    dragOffsetY: number = 0;
 
     constructor(leaf: WorkspaceLeaf, plugin: SystematicsPlugin) {
         super(leaf);
@@ -65,7 +72,7 @@ export class SystematicsGraphView extends ItemView {
         // Instructions
         const instructions = controlsDiv.createDiv({ cls: 'systematics-instructions' });
         instructions.createEl('p', {
-            text: 'Click on a node to assign a label and link it to a note.'
+            text: 'Click nodes to label/link. Drag labels to reposition them.'
         });
 
         // Canvas
@@ -78,6 +85,8 @@ export class SystematicsGraphView extends ItemView {
 
         // Event listeners
         this.canvas.addEventListener('mousemove', this.onMouseMove.bind(this));
+        this.canvas.addEventListener('mousedown', this.onMouseDown.bind(this));
+        this.canvas.addEventListener('mouseup', this.onMouseUp.bind(this));
         this.canvas.addEventListener('click', this.onCanvasClick.bind(this));
 
         // Load initial graph
@@ -87,10 +96,32 @@ export class SystematicsGraphView extends ItemView {
     resizeCanvas() {
         const container = this.containerEl.children[1];
         const rect = container.getBoundingClientRect();
-        this.canvas.width = rect.width - 40;
-        this.canvas.height = rect.height - 120;
-        this.offsetX = this.canvas.width / 2;
-        this.offsetY = this.canvas.height / 2;
+
+        // Get the actual size we want
+        const displayWidth = Math.max(rect.width - 40, 400);
+        const displayHeight = Math.max(rect.height - 140, 400);
+
+        // Account for device pixel ratio for crisp rendering
+        const dpr = window.devicePixelRatio || 1;
+
+        // Setting width/height resets the canvas, including transforms
+        this.canvas.width = displayWidth * dpr;
+        this.canvas.height = displayHeight * dpr;
+        this.canvas.style.width = displayWidth + 'px';
+        this.canvas.style.height = displayHeight + 'px';
+
+        // Get fresh context and scale it
+        this.ctx = this.canvas.getContext('2d')!;
+        this.ctx.scale(dpr, dpr);
+
+        // Set offsets based on display size (not canvas size)
+        this.offsetX = displayWidth / 2;
+        this.offsetY = displayHeight / 2;
+
+        // Adaptive scale based on canvas size with extra margin for labels
+        const minDimension = Math.min(displayWidth, displayHeight);
+        this.scale = (minDimension - 100) / 3; // More conservative scale for label space
+
         this.draw();
     }
 
@@ -106,9 +137,12 @@ export class SystematicsGraphView extends ItemView {
         // Clear canvas
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
+        // Get theme colors from CSS variables
+        const edgeColor = this.getThemeColor('--text-muted') || '#888888';
+
         // Draw edges
-        this.ctx.strokeStyle = '#888888';
-        this.ctx.lineWidth = 1;
+        this.ctx.strokeStyle = edgeColor;
+        this.ctx.lineWidth = 1.5;
 
         for (const edge of this.currentGraph.edges) {
             const from = this.currentGraph.vertices[edge.from];
@@ -132,6 +166,12 @@ export class SystematicsGraphView extends ItemView {
         }
     }
 
+    getThemeColor(cssVar: string): string | null {
+        const style = getComputedStyle(document.body);
+        const color = style.getPropertyValue(cssVar).trim();
+        return color || null;
+    }
+
     drawVertex(vertex: Vertex, isHovered: boolean, isSelected: boolean) {
         const x = this.offsetX + vertex.x * this.scale;
         const y = this.offsetY - vertex.y * this.scale;
@@ -146,33 +186,87 @@ export class SystematicsGraphView extends ItemView {
         this.ctx.beginPath();
         this.ctx.arc(x, y, radius, 0, 2 * Math.PI);
 
+        // Better colors that work with both themes
         if (hasNote) {
-            this.ctx.fillStyle = isSelected ? '#4a9eff' : '#5b8ec5';
+            this.ctx.fillStyle = isSelected ? '#3b82f6' : '#60a5fa';
         } else {
-            this.ctx.fillStyle = isSelected ? '#888888' : '#666666';
+            this.ctx.fillStyle = isSelected ? '#6b7280' : '#9ca3af';
         }
 
         this.ctx.fill();
 
+        // Add stroke for better visibility
         if (isHovered || isSelected) {
-            this.ctx.strokeStyle = '#ffffff';
-            this.ctx.lineWidth = 2;
+            this.ctx.strokeStyle = this.getThemeColor('--interactive-accent') || '#3b82f6';
+            this.ctx.lineWidth = 3;
+            this.ctx.stroke();
+        } else {
+            this.ctx.strokeStyle = this.getThemeColor('--background-modifier-border') || '#333333';
+            this.ctx.lineWidth = 1.5;
             this.ctx.stroke();
         }
 
-        // Draw label
-        this.ctx.fillStyle = '#ffffff';
-        this.ctx.font = isHovered ? 'bold 12px sans-serif' : '11px sans-serif';
+        // Always use bold font for measuring to ensure consistent wrapping
+        this.ctx.font = 'bold 12px sans-serif';
+
+        // Draw label positioned radially outside the graph
+        const displayLabel = customLabel?.label || vertex.label;
+        const lines = this.wrapText(displayLabel, 120);
+
+        // Set actual font based on hover state
+        this.ctx.font = isHovered ? 'bold 12px sans-serif' : '12px sans-serif';
+        const lineHeight = 18;
+
+        // Calculate direction from center to node (for radial positioning)
+        const dx = x - this.offsetX;
+        const dy = y - this.offsetY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        // Position text outside the graph (50px beyond the node) with custom offset
+        const baseOffsetX = customLabel?.labelOffsetX || 0;
+        const baseOffsetY = customLabel?.labelOffsetY || 0;
+        const labelDistance = distance + radius + 50;
+        const labelX = this.offsetX + (dx / distance) * labelDistance + baseOffsetX;
+        const labelY = this.offsetY + (dy / distance) * labelDistance + baseOffsetY;
+
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
 
-        const displayLabel = customLabel?.label || vertex.label;
-        const lines = this.wrapText(displayLabel, 100);
-        const lineHeight = 14;
-        const startY = y + radius + 15;
+        // Draw text with background for better visibility
+        const totalHeight = lines.length * lineHeight;
+        const startY = labelY - totalHeight / 2;
+        const isLabelHovered = this.hoveredLabel === vertex.index;
 
         lines.forEach((line, index) => {
-            this.ctx.fillText(line, x, startY + (index * lineHeight));
+            const textY = startY + (index * lineHeight) + lineHeight / 2;
+            const metrics = this.ctx.measureText(line);
+            const textWidth = metrics.width;
+            const padding = isLabelHovered ? 6 : 4;
+
+            // Draw background rectangle with hover effect
+            this.ctx.fillStyle = isLabelHovered ? 'rgba(230, 240, 255, 0.95)' : 'rgba(255, 255, 255, 0.9)';
+            this.ctx.fillRect(
+                labelX - textWidth / 2 - padding,
+                textY - lineHeight / 2 - 1,
+                textWidth + padding * 2,
+                lineHeight + 2
+            );
+
+            // Add border when hovered
+            if (isLabelHovered) {
+                this.ctx.strokeStyle = '#3b82f6';
+                this.ctx.lineWidth = 1;
+                this.ctx.strokeRect(
+                    labelX - textWidth / 2 - padding,
+                    textY - lineHeight / 2 - 1,
+                    textWidth + padding * 2,
+                    lineHeight + 2
+                );
+            }
+
+            // Draw text in black
+            this.ctx.fillStyle = '#000000';
+            this.ctx.fillText(line, labelX, textY);
         });
     }
 
@@ -205,24 +299,129 @@ export class SystematicsGraphView extends ItemView {
         const mouseX = event.clientX - rect.left;
         const mouseY = event.clientY - rect.top;
 
-        let foundVertex = null;
+        // If dragging a label, update its position
+        if (this.draggingLabel !== null) {
+            const graphKey = `K${this.currentGraph.order}`;
+            const vertex = this.currentGraph.vertices[this.draggingLabel];
 
+            if (!this.plugin.settings.nodeLabelSettings[graphKey]) {
+                this.plugin.settings.nodeLabelSettings[graphKey] = {};
+            }
+            if (!this.plugin.settings.nodeLabelSettings[graphKey][this.draggingLabel]) {
+                this.plugin.settings.nodeLabelSettings[graphKey][this.draggingLabel] = {
+                    label: vertex.label,
+                    noteFile: '',
+                    labelOffsetX: 0,
+                    labelOffsetY: 0
+                };
+            }
+
+            const dx = mouseX - this.dragStartX;
+            const dy = mouseY - this.dragStartY;
+            this.plugin.settings.nodeLabelSettings[graphKey][this.draggingLabel].labelOffsetX = this.dragOffsetX + dx;
+            this.plugin.settings.nodeLabelSettings[graphKey][this.draggingLabel].labelOffsetY = this.dragOffsetY + dy;
+
+            this.canvas.style.cursor = 'grabbing';
+            this.draw();
+            return;
+        }
+
+        // Check for label hover
+        let foundLabel = null;
         for (let i = 0; i < this.currentGraph.vertices.length; i++) {
-            const vertex = this.currentGraph.vertices[i];
-            const x = this.offsetX + vertex.x * this.scale;
-            const y = this.offsetY - vertex.y * this.scale;
-            const distance = Math.sqrt((mouseX - x) ** 2 + (mouseY - y) ** 2);
+            const labelPos = this.getLabelPosition(i);
+            if (!labelPos) continue;
 
-            if (distance <= 12) {
-                foundVertex = i;
+            const distance = Math.sqrt((mouseX - labelPos.x) ** 2 + (mouseY - labelPos.y) ** 2);
+            if (distance <= 30) { // Larger hit area for labels
+                foundLabel = i;
                 break;
             }
         }
 
-        if (foundVertex !== this.hoveredVertex) {
-            this.hoveredVertex = foundVertex;
-            this.canvas.style.cursor = foundVertex !== null ? 'pointer' : 'default';
+        // Check for vertex hover if no label is hovered
+        let foundVertex = null;
+        if (foundLabel === null) {
+            for (let i = 0; i < this.currentGraph.vertices.length; i++) {
+                const vertex = this.currentGraph.vertices[i];
+                const x = this.offsetX + vertex.x * this.scale;
+                const y = this.offsetY - vertex.y * this.scale;
+                const distance = Math.sqrt((mouseX - x) ** 2 + (mouseY - y) ** 2);
+
+                if (distance <= 12) {
+                    foundVertex = i;
+                    break;
+                }
+            }
+        }
+
+        // Update hover states
+        const needsRedraw = (foundVertex !== this.hoveredVertex) || (foundLabel !== this.hoveredLabel);
+        this.hoveredVertex = foundVertex;
+        this.hoveredLabel = foundLabel;
+
+        // Update cursor
+        if (foundLabel !== null) {
+            this.canvas.style.cursor = 'grab';
+        } else if (foundVertex !== null) {
+            this.canvas.style.cursor = 'pointer';
+        } else {
+            this.canvas.style.cursor = 'default';
+        }
+
+        if (needsRedraw) {
             this.draw();
+        }
+    }
+
+    getLabelPosition(vertexIndex: number): { x: number, y: number } | null {
+        const vertex = this.currentGraph.vertices[vertexIndex];
+        const x = this.offsetX + vertex.x * this.scale;
+        const y = this.offsetY - vertex.y * this.scale;
+        const radius = 10;
+
+        const graphKey = `K${this.currentGraph.order}`;
+        const customLabel = this.plugin.settings.nodeLabelSettings[graphKey]?.[vertexIndex];
+
+        const dx = x - this.offsetX;
+        const dy = y - this.offsetY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        const baseOffsetX = customLabel?.labelOffsetX || 0;
+        const baseOffsetY = customLabel?.labelOffsetY || 0;
+        const labelDistance = distance + radius + 50;
+        const labelX = this.offsetX + (dx / distance) * labelDistance + baseOffsetX;
+        const labelY = this.offsetY + (dy / distance) * labelDistance + baseOffsetY;
+
+        return { x: labelX, y: labelY };
+    }
+
+    onMouseDown(event: MouseEvent) {
+        const rect = this.canvas.getBoundingClientRect();
+        const mouseX = event.clientX - rect.left;
+        const mouseY = event.clientY - rect.top;
+
+        // Check if clicking on a label
+        if (this.hoveredLabel !== null) {
+            this.draggingLabel = this.hoveredLabel;
+            this.dragStartX = mouseX;
+            this.dragStartY = mouseY;
+
+            const graphKey = `K${this.currentGraph.order}`;
+            const currentSettings = this.plugin.settings.nodeLabelSettings[graphKey]?.[this.draggingLabel];
+            this.dragOffsetX = currentSettings?.labelOffsetX || 0;
+            this.dragOffsetY = currentSettings?.labelOffsetY || 0;
+
+            event.preventDefault();
+        }
+    }
+
+    onMouseUp(event: MouseEvent) {
+        if (this.draggingLabel !== null) {
+            // Save the new position
+            this.plugin.saveSettings();
+            this.draggingLabel = null;
+            this.canvas.style.cursor = 'grab';
         }
     }
 
@@ -245,26 +444,29 @@ export class SystematicsGraphView extends ItemView {
             item
                 .setTitle("Set label")
                 .setIcon("tag")
-                .onClick(async () => {
-                    const newLabel = prompt(
-                        `Enter label for node ${vertexIndex}:`,
-                        currentSettings?.label || vertex.label
-                    );
-
-                    if (newLabel !== null) {
-                        if (!this.plugin.settings.nodeLabelSettings[graphKey]) {
-                            this.plugin.settings.nodeLabelSettings[graphKey] = {};
+                .onClick(() => {
+                    new TextInputModal(
+                        this.app,
+                        `Set label for node ${vertexIndex}`,
+                        "Enter node label",
+                        currentSettings?.label || vertex.label,
+                        async (newLabel) => {
+                            if (newLabel && newLabel.trim()) {
+                                if (!this.plugin.settings.nodeLabelSettings[graphKey]) {
+                                    this.plugin.settings.nodeLabelSettings[graphKey] = {};
+                                }
+                                if (!this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex]) {
+                                    this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex] = {
+                                        label: vertex.label,
+                                        noteFile: ''
+                                    };
+                                }
+                                this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex].label = newLabel.trim();
+                                await this.plugin.saveSettings();
+                                this.draw();
+                            }
                         }
-                        if (!this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex]) {
-                            this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex] = {
-                                label: vertex.label,
-                                noteFile: ''
-                            };
-                        }
-                        this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex].label = newLabel;
-                        await this.plugin.saveSettings();
-                        this.draw();
-                    }
+                    ).open();
                 });
         });
 
@@ -272,29 +474,32 @@ export class SystematicsGraphView extends ItemView {
             item
                 .setTitle("Link to note")
                 .setIcon("link")
-                .onClick(async () => {
+                .onClick(() => {
                     const files = this.app.vault.getMarkdownFiles();
                     const fileNames = files.map(f => f.path);
 
-                    const selectedFile = prompt(
-                        `Enter note path to link (e.g., "folder/note.md"):\n\nAvailable notes:\n${fileNames.slice(0, 10).join('\n')}${fileNames.length > 10 ? '\n...' : ''}`,
-                        currentSettings?.noteFile || ''
-                    );
-
-                    if (selectedFile !== null) {
-                        if (!this.plugin.settings.nodeLabelSettings[graphKey]) {
-                            this.plugin.settings.nodeLabelSettings[graphKey] = {};
+                    new FileSuggestModal(
+                        this.app,
+                        `Link node ${vertexIndex} to note`,
+                        fileNames,
+                        currentSettings?.noteFile || '',
+                        async (selectedFile) => {
+                            if (selectedFile && selectedFile.trim()) {
+                                if (!this.plugin.settings.nodeLabelSettings[graphKey]) {
+                                    this.plugin.settings.nodeLabelSettings[graphKey] = {};
+                                }
+                                if (!this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex]) {
+                                    this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex] = {
+                                        label: vertex.label,
+                                        noteFile: ''
+                                    };
+                                }
+                                this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex].noteFile = selectedFile.trim();
+                                await this.plugin.saveSettings();
+                                this.draw();
+                            }
                         }
-                        if (!this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex]) {
-                            this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex] = {
-                                label: vertex.label,
-                                noteFile: ''
-                            };
-                        }
-                        this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex].noteFile = selectedFile;
-                        await this.plugin.saveSettings();
-                        this.draw();
-                    }
+                    ).open();
                 });
         });
 
@@ -307,6 +512,23 @@ export class SystematicsGraphView extends ItemView {
                         const file = this.app.vault.getAbstractFileByPath(currentSettings.noteFile);
                         if (file instanceof TFile) {
                             await this.app.workspace.getLeaf(false).openFile(file);
+                        }
+                    });
+            });
+        }
+
+        // Add reset position option if label has been moved
+        if (currentSettings?.labelOffsetX !== undefined || currentSettings?.labelOffsetY !== undefined) {
+            menu.addItem((item) => {
+                item
+                    .setTitle("Reset label position")
+                    .setIcon("reset")
+                    .onClick(async () => {
+                        if (this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex]) {
+                            this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex].labelOffsetX = 0;
+                            this.plugin.settings.nodeLabelSettings[graphKey][vertexIndex].labelOffsetY = 0;
+                            await this.plugin.saveSettings();
+                            this.draw();
                         }
                     });
             });
