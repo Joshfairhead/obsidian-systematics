@@ -12,10 +12,12 @@ export class ContextualSearchView extends ItemView {
     // State
     currentMonad: Monad | null = null;
     currentDyadView: DyadView | null = null;
+    currentConcepts: string[] = [];
     searchInput: HTMLInputElement;
-    polarityList: HTMLElement;
     monadInfo: HTMLElement;
     breadcrumbTrail: HTMLElement;
+    notesList: HTMLElement;
+    conceptsList: HTMLElement;
 
     constructor(leaf: WorkspaceLeaf, plugin: SystematicsPlugin) {
         super(leaf);
@@ -46,7 +48,7 @@ export class ContextualSearchView extends ItemView {
     createUI(container: Element) {
         // Header section
         const header = container.createDiv('contextual-search-header');
-        header.createEl('h2', { text: 'Systematic Contextual Search' });
+        header.createEl('h2', { text: 'Monad Explorer' });
 
         // Breadcrumb trail
         this.breadcrumbTrail = container.createDiv('breadcrumb-trail');
@@ -54,11 +56,11 @@ export class ContextualSearchView extends ItemView {
 
         // Search section
         const searchSection = container.createDiv('search-section');
-        searchSection.createEl('label', { text: 'Define Monad:' });
+        searchSection.createEl('label', { text: 'Specify Topic:' });
 
         this.searchInput = searchSection.createEl('input', {
             type: 'text',
-            placeholder: 'Enter note name or search query...'
+            placeholder: 'Enter topic (e.g., holochain, AI, blockchain)...'
         });
 
         const searchButton = searchSection.createEl('button', { text: 'Search' });
@@ -70,19 +72,14 @@ export class ContextualSearchView extends ItemView {
             }
         });
 
-        // Monad info panel
-        this.monadInfo = container.createDiv('monad-info');
+        // Create two-column layout
+        const contentLayout = container.createDiv('content-layout');
 
-        // Polarity discovery panel
-        const polaritySection = container.createDiv('polarity-section');
-        polaritySection.createEl('h3', { text: 'Discovered Polarities' });
-        this.polarityList = polaritySection.createDiv('polarity-list');
+        // Left column: Canvas and concepts
+        const leftColumn = contentLayout.createDiv('left-column');
 
-        const manualButton = polaritySection.createEl('button', { text: 'Add Manual Pairing' });
-        manualButton.addEventListener('click', () => this.handleManualPolarity());
-
-        // Canvas for visualization
-        this.canvas = container.createEl('canvas', {
+        // Canvas for monad visualization
+        this.canvas = leftColumn.createEl('canvas', {
             cls: 'contextual-search-canvas'
         });
 
@@ -92,20 +89,32 @@ export class ContextualSearchView extends ItemView {
         }
         this.ctx = ctx;
 
+        // Concepts panel (below canvas)
+        const conceptsPanel = leftColumn.createDiv('concepts-panel');
+        conceptsPanel.createEl('h3', { text: 'Key Concepts' });
+        this.conceptsList = conceptsPanel.createDiv('concepts-list');
+
+        // Right column: Monad info and notes list
+        const rightColumn = contentLayout.createDiv('right-column');
+
+        // Monad info panel
+        this.monadInfo = rightColumn.createDiv('monad-info');
+
+        // Notes list panel
+        const notesPanel = rightColumn.createDiv('notes-panel');
+        notesPanel.createEl('h3', { text: 'Related Notes' });
+        this.notesList = notesPanel.createDiv('notes-list');
+
         // Set canvas size
         this.resizeCanvas();
         window.addEventListener('resize', () => this.resizeCanvas());
-
-        // Content inspector (initially hidden)
-        const inspector = container.createDiv('content-inspector');
-        inspector.style.display = 'none';
     }
 
     resizeCanvas() {
         const parent = this.canvas.parentElement;
         if (parent) {
             this.canvas.width = parent.clientWidth;
-            this.canvas.height = 600;
+            this.canvas.height = 400;
             this.draw();
         }
     }
@@ -113,143 +122,126 @@ export class ContextualSearchView extends ItemView {
     async handleSearch() {
         const query = this.searchInput.value.trim();
         if (!query) {
-            new Notice('Please enter a search query');
+            new Notice('Please enter a topic');
             return;
         }
 
-        new Notice('Defining monad...');
+        new Notice('Searching vault...');
 
         try {
-            // Define monad based on search query
+            // Define monad based on search query (simplified - no parent hierarchy)
             this.currentMonad = await this.defineMonad(query);
 
             // Update UI
             this.updateMonadInfo();
             this.updateBreadcrumb();
+            this.displayNotes();
 
-            // Discover polarities
-            const polarities = await this.discoverPolarities(this.currentMonad);
-            this.displayPolarities(polarities);
+            // Extract and display concepts
+            this.currentConcepts = await this.extractConcepts(this.currentMonad);
+            this.displayConcepts(this.currentConcepts);
 
-            // Draw visualization
+            // Draw visualization with concepts
             this.draw();
 
-            new Notice(`Monad defined: ${this.currentMonad.noteCount} notes in scope`);
+            new Notice(`Found ${this.currentMonad.noteCount} related notes`);
         } catch (error) {
-            new Notice('Error defining monad: ' + error.message);
+            new Notice('Error searching: ' + error.message);
             console.error(error);
         }
     }
 
     /**
      * Define a monad based on search query
-     * Algorithm:
-     * 1. Find central note(s) matching query
-     * 2. Discover all linked notes (outbound + inbound links)
-     * 3. Calculate relevance scores using simplified PageRank
-     * 4. Apply fuzzy boundary threshold
+     * Simplified algorithm:
+     * 1. Find all notes matching the topic (in title or content)
+     * 2. Score by relevance (exact match > partial match)
+     * 3. Return all matching notes as the monad scope
      */
     async defineMonad(query: string): Promise<Monad> {
-        const { vault, metadataCache } = this.app;
+        const { vault } = this.app;
 
-        // Step 1: Find central note(s)
+        // Find all matching files
         const files = vault.getMarkdownFiles();
-        const matchingFiles = files.filter(file =>
-            file.basename.toLowerCase().includes(query.toLowerCase()) ||
-            file.path.toLowerCase().includes(query.toLowerCase())
-        );
+        const relevanceMap = new Map<string, number>();
 
-        if (matchingFiles.length === 0) {
+        // Search in file names and content
+        for (const file of files) {
+            const basename = file.basename.toLowerCase();
+            const path = file.path.toLowerCase();
+            const queryLower = query.toLowerCase();
+
+            let score = 0;
+
+            // Exact match in basename (highest score)
+            if (basename === queryLower) {
+                score = 1.0;
+            }
+            // Partial match in basename
+            else if (basename.includes(queryLower)) {
+                score = 0.8;
+            }
+            // Match in path
+            else if (path.includes(queryLower)) {
+                score = 0.6;
+            }
+            // Search in content
+            else {
+                const content = await vault.cachedRead(file);
+                if (content.toLowerCase().includes(queryLower)) {
+                    score = 0.5;
+                }
+            }
+
+            if (score > 0) {
+                relevanceMap.set(file.path, score);
+            }
+        }
+
+        if (relevanceMap.size === 0) {
             throw new Error(`No notes found matching "${query}"`);
         }
 
-        // Use best match as center (for now, just first match)
-        // TODO: Rank by relevance
-        const centerFile = matchingFiles[0];
-
-        // Step 2: Discover connected notes
-        const connectedNotes = new Set<string>();
-        connectedNotes.add(centerFile.path);
-
-        // Get all links from center note
-        const cache = metadataCache.getFileCache(centerFile);
-        if (cache?.links) {
-            for (const link of cache.links) {
-                const linkedFile = metadataCache.getFirstLinkpathDest(link.link, centerFile.path);
-                if (linkedFile) {
-                    connectedNotes.add(linkedFile.path);
-                }
-            }
-        }
-
-        // Get backlinks to center note (find all files that link to this one)
-        for (const file of files) {
-            const cache = metadataCache.getFileCache(file);
-            if (cache?.links) {
-                for (const link of cache.links) {
-                    const linkedFile = metadataCache.getFirstLinkpathDest(link.link, file.path);
-                    if (linkedFile?.path === centerFile.path) {
-                        connectedNotes.add(file.path);
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Step 3: Calculate relevance scores
-        // For MVP: Simple distance-based scoring
-        // Center = 1.0, direct links = 0.7, backlinks = 0.7
-        const relevanceMap = new Map<string, number>();
-        relevanceMap.set(centerFile.path, 1.0);
-
-        for (const notePath of connectedNotes) {
-            if (notePath !== centerFile.path) {
-                relevanceMap.set(notePath, 0.7);
-            }
-        }
-
-        // Step 4: Apply threshold
-        const threshold = 0.3;
-        const inScope = new Map<string, number>();
-        let count = 0;
-
-        for (const [path, score] of relevanceMap) {
-            if (score >= threshold) {
-                inScope.set(path, score);
-                count++;
-            }
-        }
-
-        // Create monad
+        // Create monad (no parent hierarchy - always top-level from Vault)
         const monad: Monad = {
             id: Date.now().toString(),
-            name: centerFile.basename,
+            name: query,
             query: query,
-            centerNote: centerFile.path,
-            contentInScope: inScope,
-            relevanceThreshold: threshold,
-            parent: this.currentMonad || undefined,
+            contentInScope: relevanceMap,
+            relevanceThreshold: 0.0, // Include all matches
+            parent: undefined, // Always top-level
             createdAt: new Date(),
-            noteCount: count
+            noteCount: relevanceMap.size
         };
 
         return monad;
     }
 
     /**
-     * Discover polarities within a monad
-     * Algorithm:
-     * 1. Extract terms from all notes in scope
-     * 2. Find co-occurring term pairs (same-context)
-     * 3. Find contrasting term pairs (cross-context)
-     * 4. Rank by frequency and relevance
+     * Extract key concepts from notes in the monad
+     * Returns the most frequent meaningful terms
      */
-    async discoverPolarities(monad: Monad): Promise<Polarity[]> {
+    async extractConcepts(monad: Monad): Promise<string[]> {
         const { vault } = this.app;
 
-        // Step 1: Extract terms from notes
+        // Extract terms from notes
         const allTerms: Map<string, number> = new Map(); // term → frequency
-        const termContexts: Map<string, string[]> = new Map(); // term → contexts (sentences)
+
+        // Common words to filter out
+        const stopWords = new Set([
+            'the', 'be', 'to', 'of', 'and', 'a', 'in', 'that', 'have', 'i',
+            'it', 'for', 'not', 'on', 'with', 'he', 'as', 'you', 'do', 'at',
+            'this', 'but', 'his', 'by', 'from', 'they', 'we', 'say', 'her', 'she',
+            'or', 'an', 'will', 'my', 'one', 'all', 'would', 'there', 'their',
+            'what', 'so', 'up', 'out', 'if', 'about', 'who', 'get', 'which', 'go',
+            'when', 'make', 'can', 'like', 'time', 'no', 'just', 'him', 'know',
+            'take', 'people', 'into', 'year', 'your', 'good', 'some', 'could', 'them',
+            'see', 'other', 'than', 'then', 'now', 'look', 'only', 'come', 'its',
+            'over', 'think', 'also', 'back', 'after', 'use', 'two', 'how', 'our',
+            'work', 'first', 'well', 'way', 'even', 'new', 'want', 'because', 'any',
+            'these', 'give', 'day', 'most', 'us', 'is', 'was', 'are', 'been', 'has',
+            'had', 'were', 'said', 'did', 'having', 'may', 'should', 'am', 'being'
+        ]);
 
         for (const [notePath, _score] of monad.contentInScope) {
             const file = vault.getAbstractFileByPath(notePath);
@@ -257,186 +249,124 @@ export class ContextualSearchView extends ItemView {
 
             const content = await vault.cachedRead(file);
 
-            // Extract terms (simple: split on whitespace, lowercase, filter short words)
+            // Extract terms (split on whitespace, lowercase, filter short/common words)
             const words = content
                 .toLowerCase()
+                .replace(/[#*_`\[\]()]/g, ' ') // Remove markdown syntax
                 .split(/\s+/)
                 .filter(w => w.length > 3)
-                .map(w => w.replace(/[^a-z0-9]/g, ''));
+                .map(w => w.replace(/[^a-z0-9]/g, ''))
+                .filter(w => w.length > 0 && !stopWords.has(w));
 
             for (const word of words) {
                 allTerms.set(word, (allTerms.get(word) || 0) + 1);
             }
-
-            // Extract contexts (sentences containing terms)
-            const sentences = content.split(/[.!?]+/);
-            for (const sentence of sentences) {
-                const sentenceLower = sentence.toLowerCase();
-                for (const word of words) {
-                    if (!termContexts.has(word)) {
-                        termContexts.set(word, []);
-                    }
-                    if (sentenceLower.includes(word)) {
-                        termContexts.get(word)!.push(sentence.trim());
-                    }
-                }
-            }
         }
 
-        // Step 2: Find co-occurring pairs (simple co-occurrence in same sentences)
-        const pairs: Map<string, { termA: string; termB: string; cooccurrence: number }> = new Map();
+        // Get top concepts by frequency
+        const concepts = Array.from(allTerms.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 12) // Top 12 concepts
+            .map(([term, _freq]) => term);
 
-        for (const [termA, contextsA] of termContexts) {
-            for (const [termB, contextsB] of termContexts) {
-                if (termA >= termB) continue; // Avoid duplicates and self-pairs
-
-                // Count sentences where both terms appear
-                let cooccurrence = 0;
-                for (const ctx of contextsA) {
-                    if (contextsB.some(cb => cb === ctx)) {
-                        cooccurrence++;
-                    }
-                }
-
-                if (cooccurrence > 0) {
-                    const key = `${termA}|${termB}`;
-                    pairs.set(key, { termA, termB, cooccurrence });
-                }
-            }
-        }
-
-        // Step 3: Rank pairs by co-occurrence
-        const rankedPairs = Array.from(pairs.values())
-            .sort((a, b) => b.cooccurrence - a.cooccurrence)
-            .slice(0, 10); // Top 10 pairs
-
-        // Step 4: Convert to Polarity objects
-        const polarities: Polarity[] = rankedPairs.map(pair => {
-            const poleA: ConceptualNode = {
-                label: pair.termA,
-                terms: [pair.termA],
-                notes: this.getNotesContainingTerm(monad, pair.termA),
-                relevance: (allTerms.get(pair.termA) || 0) / monad.noteCount
-            };
-
-            const poleB: ConceptualNode = {
-                label: pair.termB,
-                terms: [pair.termB],
-                notes: this.getNotesContainingTerm(monad, pair.termB),
-                relevance: (allTerms.get(pair.termB) || 0) / monad.noteCount
-            };
-
-            return {
-                id: `${pair.termA}-${pair.termB}`,
-                poleA,
-                poleB,
-                confidence: pair.cooccurrence / monad.noteCount,
-                type: 'same-context',
-                isManual: false
-            };
-        });
-
-        return polarities;
+        return concepts;
     }
 
-    getNotesContainingTerm(monad: Monad, term: string): string[] {
-        // This would need async implementation in production
-        // For now, return empty array as placeholder
-        return [];
-    }
+    /**
+     * Display the list of notes in the monad
+     */
+    displayNotes() {
+        this.notesList.empty();
 
-    displayPolarities(polarities: Polarity[]) {
-        this.polarityList.empty();
-
-        if (polarities.length === 0) {
-            this.polarityList.createEl('p', { text: 'No polarities discovered' });
+        if (!this.currentMonad || this.currentMonad.contentInScope.size === 0) {
+            this.notesList.createEl('p', { text: 'No notes found', cls: 'empty-message' });
             return;
         }
 
-        for (const polarity of polarities) {
-            const item = this.polarityList.createDiv('polarity-item');
+        // Sort notes by relevance score
+        const sortedNotes = Array.from(this.currentMonad.contentInScope.entries())
+            .sort((a, b) => b[1] - a[1]);
 
-            const label = item.createEl('label');
-            const checkbox = label.createEl('input', { type: 'radio', attr: { name: 'polarity' } });
-            label.appendText(`${polarity.poleA.label} / ${polarity.poleB.label} `);
-            label.createEl('span', {
-                text: `(${polarity.confidence.toFixed(2)})`,
-                cls: 'confidence-score'
+        const noteItems = this.notesList.createEl('ul', { cls: 'note-items' });
+
+        for (const [notePath, score] of sortedNotes) {
+            const file = this.app.vault.getAbstractFileByPath(notePath);
+            if (!(file instanceof TFile)) continue;
+
+            const item = noteItems.createEl('li', { cls: 'note-item' });
+
+            const link = item.createEl('a', {
+                text: file.basename,
+                cls: 'note-link'
             });
 
-            checkbox.addEventListener('change', () => {
-                if (checkbox.checked) {
-                    this.handlePolaritySelect(polarity);
-                }
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.app.workspace.openLinkText(file.path, '', false);
+            });
+
+            // Add relevance indicator
+            const relevance = item.createEl('span', {
+                text: `${(score * 100).toFixed(0)}%`,
+                cls: 'relevance-score'
             });
         }
     }
 
-    handlePolaritySelect(polarity: Polarity) {
-        if (!this.currentMonad) return;
+    /**
+     * Display extracted concepts
+     */
+    displayConcepts(concepts: string[]) {
+        this.conceptsList.empty();
 
-        this.currentDyadView = {
-            monad: this.currentMonad,
-            selectedPolarity: polarity,
-            alternativePolarities: []
-        };
+        if (concepts.length === 0) {
+            this.conceptsList.createEl('p', { text: 'No concepts extracted', cls: 'empty-message' });
+            return;
+        }
 
-        this.draw();
-        new Notice(`Visualizing: ${polarity.poleA.label} / ${polarity.poleB.label}`);
-    }
+        const conceptItems = this.conceptsList.createEl('div', { cls: 'concept-items' });
 
-    handleManualPolarity() {
-        new Notice('Manual polarity creation not yet implemented');
-        // TODO: Show modal to manually define poles
+        for (const concept of concepts) {
+            conceptItems.createEl('span', {
+                text: concept,
+                cls: 'concept-tag'
+            });
+        }
     }
 
     updateMonadInfo() {
         this.monadInfo.empty();
 
         if (!this.currentMonad) {
-            this.monadInfo.createEl('p', { text: 'No monad defined' });
+            this.monadInfo.createEl('p', { text: 'Enter a topic to explore', cls: 'empty-message' });
             return;
         }
 
         this.monadInfo.createEl('h3', { text: this.currentMonad.name });
-        this.monadInfo.createEl('p', { text: `Scope: ${this.currentMonad.noteCount} notes` });
-        this.monadInfo.createEl('p', { text: `Query: "${this.currentMonad.query}"` });
+        this.monadInfo.createEl('p', {
+            text: `${this.currentMonad.noteCount} note${this.currentMonad.noteCount === 1 ? '' : 's'} found`,
+            cls: 'note-count'
+        });
     }
 
     updateBreadcrumb() {
         this.breadcrumbTrail.empty();
 
-        if (!this.currentMonad) {
-            this.breadcrumbTrail.createEl('span', { text: 'Vault' });
-            return;
+        // Always show "Vault" first
+        this.breadcrumbTrail.createEl('span', { text: 'Vault', cls: 'breadcrumb-vault' });
+
+        // Add topic if monad is defined
+        if (this.currentMonad) {
+            this.breadcrumbTrail.createEl('span', { text: ' > ', cls: 'breadcrumb-separator' });
+            this.breadcrumbTrail.createEl('span', {
+                text: this.currentMonad.name,
+                cls: 'breadcrumb-topic'
+            });
         }
-
-        // Build breadcrumb from parent chain
-        const crumbs: Monad[] = [];
-        let current: Monad | undefined = this.currentMonad;
-        while (current) {
-            crumbs.unshift(current);
-            current = current.parent;
-        }
-
-        this.breadcrumbTrail.createEl('span', { text: 'Vault' });
-
-        for (const monad of crumbs) {
-            this.breadcrumbTrail.createEl('span', { text: ' > ' });
-            const crumb = this.breadcrumbTrail.createEl('a', { text: monad.name });
-            crumb.addEventListener('click', () => this.navigateToMonad(monad));
-        }
-    }
-
-    navigateToMonad(monad: Monad) {
-        this.currentMonad = monad;
-        this.updateMonadInfo();
-        this.updateBreadcrumb();
-        this.draw();
     }
 
     /**
-     * Draw the monad visualization
+     * Draw the monad visualization with concepts
      */
     draw() {
         const width = this.canvas.width;
@@ -450,7 +380,7 @@ export class ContextualSearchView extends ItemView {
             this.ctx.fillStyle = '#888';
             this.ctx.font = '16px sans-serif';
             this.ctx.textAlign = 'center';
-            this.ctx.fillText('Enter a search query to define a monad', width / 2, height / 2);
+            this.ctx.fillText('Enter a topic to begin exploring', width / 2, height / 2);
             return;
         }
 
@@ -471,51 +401,38 @@ export class ContextualSearchView extends ItemView {
         this.ctx.arc(centerX, centerY, 5, 0, 2 * Math.PI);
         this.ctx.fill();
 
-        // Draw monad label
+        // Draw monad label at center
         this.ctx.fillStyle = '#333';
-        this.ctx.font = 'bold 18px sans-serif';
+        this.ctx.font = 'bold 16px sans-serif';
         this.ctx.textAlign = 'center';
-        this.ctx.fillText(this.currentMonad.name, centerX, centerY - radius - 20);
+        this.ctx.fillText(this.currentMonad.name, centerX, centerY + 25);
 
-        // If dyad is selected, draw poles
-        if (this.currentDyadView) {
-            const polarity = this.currentDyadView.selectedPolarity;
+        // Draw concepts around the circle
+        if (this.currentConcepts.length > 0) {
+            const angleStep = (2 * Math.PI) / this.currentConcepts.length;
+            this.ctx.font = '12px sans-serif';
 
-            // Pole A (left)
-            const poleAX = centerX - radius / 2;
-            const poleAY = centerY;
+            for (let i = 0; i < this.currentConcepts.length; i++) {
+                const angle = i * angleStep - Math.PI / 2; // Start at top
+                const x = centerX + radius * Math.cos(angle);
+                const y = centerY + radius * Math.sin(angle);
 
-            this.ctx.fillStyle = '#ff6b6b';
-            this.ctx.beginPath();
-            this.ctx.arc(poleAX, poleAY, 10, 0, 2 * Math.PI);
-            this.ctx.fill();
+                // Draw concept dot
+                this.ctx.fillStyle = '#9b59b6';
+                this.ctx.beginPath();
+                this.ctx.arc(x, y, 4, 0, 2 * Math.PI);
+                this.ctx.fill();
 
-            this.ctx.fillStyle = '#333';
-            this.ctx.font = '14px sans-serif';
-            this.ctx.textAlign = 'center';
-            this.ctx.fillText(polarity.poleA.label, poleAX, poleAY - 20);
-            this.ctx.fillText(`(${polarity.poleA.notes.length} notes)`, poleAX, poleAY + 30);
+                // Draw concept label
+                this.ctx.fillStyle = '#555';
+                this.ctx.textAlign = 'center';
 
-            // Pole B (right)
-            const poleBX = centerX + radius / 2;
-            const poleBY = centerY;
+                // Position text outside the circle
+                const labelX = centerX + (radius + 30) * Math.cos(angle);
+                const labelY = centerY + (radius + 30) * Math.sin(angle);
 
-            this.ctx.fillStyle = '#51cf66';
-            this.ctx.beginPath();
-            this.ctx.arc(poleBX, poleBY, 10, 0, 2 * Math.PI);
-            this.ctx.fill();
-
-            this.ctx.fillStyle = '#333';
-            this.ctx.fillText(polarity.poleB.label, poleBX, poleBY - 20);
-            this.ctx.fillText(`(${polarity.poleB.notes.length} notes)`, poleBX, poleBY + 30);
-
-            // Draw edge between poles
-            this.ctx.strokeStyle = '#999';
-            this.ctx.lineWidth = 1;
-            this.ctx.beginPath();
-            this.ctx.moveTo(poleAX, poleAY);
-            this.ctx.lineTo(poleBX, poleBY);
-            this.ctx.stroke();
+                this.ctx.fillText(this.currentConcepts[i], labelX, labelY);
+            }
         }
     }
 
