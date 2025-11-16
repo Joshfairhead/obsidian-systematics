@@ -122,7 +122,9 @@ export class ContextualSearchView extends ItemView {
         const parent = this.canvas.parentElement;
         if (parent) {
             // Maintain square aspect ratio to keep circle circular
-            const size = Math.min(parent.clientWidth, 400);
+            // Use max to ensure we have a minimum size even if parent width is 0
+            const parentWidth = parent.clientWidth || 400;
+            const size = Math.min(Math.max(parentWidth, 300), 600);
             this.canvas.width = size;
             this.canvas.height = size;
             this.draw();
@@ -575,9 +577,13 @@ export class ContextualSearchView extends ItemView {
         // Clear canvas
         this.ctx.clearRect(0, 0, width, height);
 
+        // Get theme-appropriate colors
+        const textColor = getComputedStyle(document.body).getPropertyValue('--text-normal').trim() || '#000';
+        const mutedColor = getComputedStyle(document.body).getPropertyValue('--text-muted').trim() || '#888';
+
         if (!this.currentMonad) {
             // Draw empty state
-            this.ctx.fillStyle = '#888';
+            this.ctx.fillStyle = mutedColor;
             this.ctx.font = '16px sans-serif';
             this.ctx.textAlign = 'center';
             this.ctx.fillText('Enter a topic to begin exploring', width / 2, height / 2);
@@ -602,7 +608,7 @@ export class ContextualSearchView extends ItemView {
         this.ctx.fill();
 
         // Draw monad label at center
-        this.ctx.fillStyle = '#333';
+        this.ctx.fillStyle = textColor;
         this.ctx.font = 'bold 16px sans-serif';
         this.ctx.textAlign = 'center';
         this.ctx.fillText(this.currentMonad.name, centerX, centerY + 25);
@@ -633,7 +639,7 @@ export class ContextualSearchView extends ItemView {
                     this.ctx.fill();
 
                     // Draw concept label next to dot (inside the circle)
-                    this.ctx.fillStyle = '#555';
+                    this.ctx.fillStyle = textColor;
                     this.ctx.textAlign = 'center';
                     this.ctx.fillText(this.currentConcepts[conceptIndex], x, y - 8);
                 }
