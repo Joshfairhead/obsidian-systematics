@@ -121,3 +121,205 @@
         padding: 8px;
     }
 }
+
+/* Contextual Search View Styles */
+.systematics-contextual-search {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    background-color: var(--background-primary);
+    overflow-y: auto;
+}
+
+.contextual-search-header h2 {
+    margin: 0 0 15px 0;
+    color: var(--text-normal);
+    font-size: 1.5em;
+}
+
+.breadcrumb-trail {
+    margin-bottom: 15px;
+    padding: 8px 12px;
+    background-color: var(--background-secondary);
+    border-radius: 6px;
+    font-size: 0.9em;
+    color: var(--text-muted);
+}
+
+.breadcrumb-trail a {
+    color: var(--interactive-accent);
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.breadcrumb-trail a:hover {
+    text-decoration: underline;
+}
+
+.search-section {
+    margin-bottom: 20px;
+    padding: 15px;
+    background-color: var(--background-secondary);
+    border-radius: 8px;
+}
+
+.search-section label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: var(--text-normal);
+}
+
+.search-section input {
+    width: calc(100% - 100px);
+    padding: 8px 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    background-color: var(--background-primary);
+    color: var(--text-normal);
+    font-size: 0.95em;
+}
+
+.search-section button {
+    margin-left: 10px;
+    padding: 8px 16px;
+    background-color: var(--interactive-accent);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.search-section button:hover {
+    background-color: var(--interactive-accent-hover);
+}
+
+.monad-info {
+    margin-bottom: 20px;
+    padding: 15px;
+    background-color: var(--background-primary-alt);
+    border-radius: 8px;
+    border-left: 4px solid var(--interactive-accent);
+}
+
+.monad-info h3 {
+    margin: 0 0 10px 0;
+    color: var(--text-normal);
+}
+
+.monad-info p {
+    margin: 5px 0;
+    color: var(--text-muted);
+    font-size: 0.9em;
+}
+
+.polarity-section {
+    margin-bottom: 20px;
+    padding: 15px;
+    background-color: var(--background-secondary);
+    border-radius: 8px;
+}
+
+.polarity-section h3 {
+    margin: 0 0 15px 0;
+    color: var(--text-normal);
+}
+
+.polarity-section button {
+    margin-top: 10px;
+    padding: 6px 12px;
+    background-color: var(--background-modifier-border);
+    color: var(--text-normal);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85em;
+}
+
+.polarity-section button:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+.polarity-list {
+    margin: 10px 0;
+}
+
+.polarity-item {
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    background-color: var(--background-primary);
+    border-radius: 4px;
+    border: 1px solid var(--background-modifier-border);
+}
+
+.polarity-item label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    color: var(--text-normal);
+}
+
+.polarity-item input[type="radio"] {
+    margin-right: 10px;
+}
+
+.polarity-item:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+.confidence-score {
+    margin-left: 8px;
+    color: var(--text-muted);
+    font-size: 0.85em;
+}
+
+.contextual-search-canvas {
+    width: 100%;
+    min-height: 600px;
+    border: 2px solid var(--background-modifier-border);
+    border-radius: 8px;
+    background-color: var(--background-primary-alt);
+    cursor: pointer;
+    margin-bottom: 20px;
+}
+
+.theme-dark .contextual-search-canvas {
+    background-color: #1a1a1a;
+}
+
+.theme-light .contextual-search-canvas {
+    background-color: #ffffff;
+}
+
+.content-inspector {
+    padding: 15px;
+    background-color: var(--background-secondary);
+    border-radius: 8px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.content-inspector h3 {
+    margin: 0 0 10px 0;
+    color: var(--text-normal);
+}
+
+.content-inspector ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.content-inspector li {
+    padding: 6px 10px;
+    margin-bottom: 4px;
+    background-color: var(--background-primary);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.content-inspector li:hover {
+    background-color: var(--background-modifier-hover);
+}

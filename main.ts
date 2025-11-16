@@ -1,6 +1,7 @@
 import { App, Plugin, PluginSettingTab, Setting, WorkspaceLeaf } from 'obsidian';
 import { SystematicsSettings } from './src/types';
 import { SystematicsGraphView, VIEW_TYPE_SYSTEMATICS } from './src/graphView';
+import { ContextualSearchView, VIEW_TYPE_CONTEXTUAL_SEARCH } from './src/contextualSearchView';
 
 const DEFAULT_SETTINGS: SystematicsSettings = {
     currentGraph: 3,
@@ -13,23 +14,40 @@ export default class SystematicsPlugin extends Plugin {
     async onload() {
         await this.loadSettings();
 
-        // Register the custom view
+        // Register the custom views
         this.registerView(
             VIEW_TYPE_SYSTEMATICS,
             (leaf) => new SystematicsGraphView(leaf, this)
         );
 
-        // Add ribbon icon
+        this.registerView(
+            VIEW_TYPE_CONTEXTUAL_SEARCH,
+            (leaf) => new ContextualSearchView(leaf, this)
+        );
+
+        // Add ribbon icons
         this.addRibbonIcon('git-fork', 'Open Systematics Graph', () => {
             this.activateView();
         });
 
-        // Add command to open the view
+        this.addRibbonIcon('search', 'Open Contextual Search', () => {
+            this.activateContextualSearch();
+        });
+
+        // Add commands to open the views
         this.addCommand({
             id: 'open-systematics-graph',
             name: 'Open Systematics Graph',
             callback: () => {
                 this.activateView();
+            }
+        });
+
+        this.addCommand({
+            id: 'open-contextual-search',
+            name: 'Open Contextual Search',
+            callback: () => {
+                this.activateContextualSearch();
             }
         });
 
@@ -51,6 +69,28 @@ export default class SystematicsPlugin extends Plugin {
             // in the right sidebar for it
             leaf = workspace.getRightLeaf(false);
             await leaf?.setViewState({ type: VIEW_TYPE_SYSTEMATICS, active: true });
+        }
+
+        // Reveal the leaf in case it is in a collapsed sidebar
+        if (leaf) {
+            workspace.revealLeaf(leaf);
+        }
+    }
+
+    async activateContextualSearch() {
+        const { workspace } = this.app;
+
+        let leaf: WorkspaceLeaf | null = null;
+        const leaves = workspace.getLeavesOfType(VIEW_TYPE_CONTEXTUAL_SEARCH);
+
+        if (leaves.length > 0) {
+            // A leaf with our view already exists, use that
+            leaf = leaves[0];
+        } else {
+            // Our view could not be found in the workspace, create a new leaf
+            // in the right sidebar for it
+            leaf = workspace.getRightLeaf(false);
+            await leaf?.setViewState({ type: VIEW_TYPE_CONTEXTUAL_SEARCH, active: true });
         }
 
         // Reveal the leaf in case it is in a collapsed sidebar
