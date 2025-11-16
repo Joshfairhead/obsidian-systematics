@@ -47,3 +47,70 @@ export interface SystematicsSettings {
     currentGraph: number; // Which Kn graph is currently selected (3-12)
     nodeLabelSettings: { [graphKey: string]: NodeLabelSettings };
 }
+
+/**
+ * Contextual Search System Types
+ */
+
+/**
+ * Represents a monad (bounded search scope/context)
+ */
+export interface Monad {
+    id: string;                                 // Unique identifier
+    name: string;                               // "Holochain", "DHT", auto-generated
+    query: string;                              // Original search query
+    centerNote?: string;                        // Central note file path (if applicable)
+
+    // Fuzzy boundary
+    contentInScope: Map<string, number>;        // noteFile → relevance score (0-1)
+    relevanceThreshold: number;                 // Cutoff for inclusion (default 0.3)
+
+    // Hierarchy
+    parent?: Monad;                             // Parent monad (for drill-down)
+    children?: Monad[];                         // Discovered sub-monads
+
+    // Metadata
+    createdAt: Date;
+    noteCount: number;                          // Notes within threshold
+}
+
+/**
+ * Represents a conceptual node (cluster of related notes/concepts)
+ */
+export interface ConceptualNode {
+    label: string;                              // "Entries", "Private Space"
+    terms: string[];                            // Keywords representing this concept
+    notes: string[];                            // Note file paths in this cluster
+    relevance: number;                          // Relevance to parent monad
+}
+
+/**
+ * Represents a polarity (complementary binary opposition)
+ */
+export interface Polarity {
+    id: string;
+    poleA: ConceptualNode;                      // One pole of dyad
+    poleB: ConceptualNode;                      // Opposite pole
+    confidence: number;                         // 0-1 score
+    type: 'same-context' | 'cross-context';     // Proximity type
+    isManual: boolean;                          // User-defined or auto-detected
+}
+
+/**
+ * Represents a dyad view (K2 visualization)
+ */
+export interface DyadView {
+    monad: Monad;                               // The scoped context
+    selectedPolarity: Polarity;                 // Chosen dyad to visualize
+    alternativePolarities: Polarity[];          // Other suggestions
+}
+
+/**
+ * Represents a systematic view (any Kn lens applied to monad)
+ */
+export interface SystematicView {
+    monad: Monad;
+    systemOrder: number;                        // 2 for K2, 3 for K3, etc.
+    vertices: ConceptualNode[];                 // Mapped to graph vertices
+    edges: Edge[];                              // Relationships between vertices
+}
