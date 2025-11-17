@@ -122,11 +122,19 @@ export class ContextualSearchView extends ItemView {
         const parent = this.canvas.parentElement;
         if (parent) {
             // Maintain square aspect ratio to keep circle circular
-            // Use max to ensure we have a minimum size even if parent width is 0
+            // Get parent width, with fallback for initial load
             const parentWidth = parent.clientWidth || 400;
-            const size = Math.min(Math.max(parentWidth, 300), 600);
+
+            // Set a reasonable size: minimum 300px, maximum 600px
+            const size = Math.min(Math.max(parentWidth - 40, 300), 600);
+
+            // Set both canvas internal dimensions AND display size to the same value
+            // This prevents stretching/distortion
             this.canvas.width = size;
             this.canvas.height = size;
+            this.canvas.style.width = size + 'px';
+            this.canvas.style.height = size + 'px';
+
             this.draw();
         }
     }
