@@ -179,15 +179,31 @@ export class SemanticMonadView extends ItemView {
         this.isIndexing = true;
         this.indexButton.disabled = true;
         this.indexButton.setText('Indexing...');
+        this.statusDiv.setText('Initializing embedding model...');
 
         let indexed = 0;
         let failed = 0;
 
         try {
-            const files = this.app.vault.getMarkdownFiles();
-            new Notice(`Indexing ${files.length} notes...`);
+            // Initialize embedding service first
+            this.statusDiv.setText('Loading AI model from CDN...');
+            new Notice('Loading AI model (first time takes ~30 seconds)...', 5000);
 
-            const batchSize = 5; // Smaller batches for better error recovery
+            try {
+                await this.embeddingService.initialize();
+                this.statusDiv.setText('AI model loaded! Starting to index...');
+                new Notice('AI model ready! Starting indexing...', 3000);
+            } catch (error) {
+                const msg = `Failed to load AI model: ${error.message}`;
+                this.statusDiv.setText(msg);
+                throw error;
+            }
+
+            const files = this.app.vault.getMarkdownFiles();
+            new Notice(`Found ${files.length} notes to index`);
+            this.statusDiv.setText(`Indexing 0/${files.length} notes...`);
+
+            const batchSize = 5;
 
             for (let i = 0; i < files.length; i += batchSize) {
                 const batch = files.slice(i, i + batchSize);
@@ -197,8 +213,13 @@ export class SemanticMonadView extends ItemView {
                         await this.indexNote(file);
                         indexed++;
 
+                        // Update status more frequently
+                        if (indexed % 5 === 0) {
+                            this.statusDiv.setText(`Indexing ${indexed}/${files.length} notes...`);
+                        }
+
                         if (indexed % 20 === 0) {
-                            this.statusDiv.setText(`Indexed ${indexed}/${files.length} notes`);
+                            new Notice(`Progress: ${indexed}/${files.length} notes`, 2000);
                             console.log(`Progress: ${indexed}/${files.length} notes indexed`);
                         }
                     } catch (error) {
@@ -207,7 +228,8 @@ export class SemanticMonadView extends ItemView {
 
                         // Show error for first few failures
                         if (failed <= 3) {
-                            new Notice(`Error indexing ${file.basename}: ${error.message}`, 5000);
+                            new Notice(`Error indexing ${file.basename}: ${error.message}`, 8000);
+                            this.statusDiv.setText(`Error on ${file.basename}: ${error.message}`);
                         }
 
                         // If too many failures early on, abort
@@ -219,15 +241,21 @@ export class SemanticMonadView extends ItemView {
             }
 
             if (indexed > 0) {
-                new Notice(`Successfully indexed ${indexed} notes!` + (failed > 0 ? ` (${failed} failed)` : ''));
+                const msg = `Indexed ${indexed} notes!` + (failed > 0 ? ` (${failed} failed)` : '');
+                new Notice(msg);
+                this.statusDiv.setText(`Index: ${indexed} notes` + (failed > 0 ? ` (${failed} errors)` : ''));
             } else {
-                new Notice('No notes were indexed. Check console for errors.');
+                const msg = 'No notes were indexed - all failed. See errors above.';
+                new Notice(msg, 10000);
+                this.statusDiv.setText(msg);
             }
 
             await this.updateIndexStatus();
 
         } catch (error) {
-            new Notice('Indexing failed: ' + error.message, 10000);
+            const msg = 'Indexing failed: ' + error.message;
+            new Notice(msg, 10000);
+            this.statusDiv.setText(msg);
             console.error('Indexing error:', error);
         } finally {
             this.isIndexing = false;
