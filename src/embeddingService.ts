@@ -43,19 +43,39 @@ export class EmbeddingService {
             // Dynamically import transformers.js from CDN
             console.log('Importing transformers.js from CDN...');
             // @ts-expect-error - Dynamic CDN import not in type system
-            const { pipeline } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.0');
-            console.log('Transformers.js loaded successfully');
+            const transformersModule = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.0');
+            console.log('Transformers.js module loaded:', Object.keys(transformersModule));
+
+            // Access the pipeline function
+            const { pipeline, env } = transformersModule;
+
+            if (!pipeline) {
+                throw new Error('Pipeline function not found in transformers module');
+            }
+
+            console.log('Configuring transformers.js environment...');
+            // Configure for local execution
+            if (env) {
+                env.allowLocalModels = false;
+                env.useBrowserCache = true;
+                console.log('Environment configured');
+            }
 
             // Initialize the feature extraction pipeline
             console.log('Initializing feature extraction pipeline...');
-            this.pipeline = await pipeline('feature-extraction', this.model);
+            this.pipeline = await pipeline('feature-extraction', this.model, {
+                progress_callback: (progress: any) => {
+                    console.log('Model download progress:', progress);
+                }
+            });
             console.log('Pipeline initialized successfully');
 
             new Notice('Embedding model ready!');
         } catch (error) {
             console.error('Failed to initialize embedding model:', error);
+            console.error('Error stack:', error instanceof Error ? error.stack : 'No stack');
             const errorMsg = error instanceof Error ? error.message : String(error);
-            throw new Error(`Failed to load embedding model: ${errorMsg}. This might be a network/CORS issue. Check browser console for details.`);
+            throw new Error(`Failed to load embedding model: ${errorMsg}. Check console for full error details.`);
         }
     }
 

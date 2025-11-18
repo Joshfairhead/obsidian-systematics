@@ -196,7 +196,9 @@ export class SemanticMonadView extends ItemView {
             } catch (error) {
                 const msg = `Failed to load AI model: ${error.message}`;
                 this.statusDiv.setText(msg);
-                throw error;
+                new Notice('AI model failed to load. This feature requires internet access and may not work in all Obsidian environments.', 15000);
+                console.error('Embedding service initialization failed:', error);
+                throw new Error('AI embeddings unavailable: ' + error.message + '. Try checking if you have internet access and that Obsidian can access external CDNs.');
             }
 
             const files = this.app.vault.getMarkdownFiles();
