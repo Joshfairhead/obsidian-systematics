@@ -180,12 +180,14 @@ export class SemanticMonadView extends ItemView {
         this.indexButton.disabled = true;
         this.indexButton.setText('Indexing...');
 
+        let indexed = 0;
+        let failed = 0;
+
         try {
             const files = this.app.vault.getMarkdownFiles();
             new Notice(`Indexing ${files.length} notes...`);
 
-            let indexed = 0;
-            const batchSize = 10;
+            const batchSize = 5; // Smaller batches for better error recovery
 
             for (let i = 0; i < files.length; i += batchSize) {
                 const batch = files.slice(i, i + batchSize);
@@ -197,23 +199,42 @@ export class SemanticMonadView extends ItemView {
 
                         if (indexed % 20 === 0) {
                             this.statusDiv.setText(`Indexed ${indexed}/${files.length} notes`);
+                            console.log(`Progress: ${indexed}/${files.length} notes indexed`);
                         }
                     } catch (error) {
+                        failed++;
                         console.error(`Failed to index ${file.path}:`, error);
+
+                        // Show error for first few failures
+                        if (failed <= 3) {
+                            new Notice(`Error indexing ${file.basename}: ${error.message}`, 5000);
+                        }
+
+                        // If too many failures early on, abort
+                        if (failed > 5 && indexed < 10) {
+                            throw new Error(`Too many indexing failures. Last error: ${error.message}`);
+                        }
                     }
                 }
             }
 
-            new Notice(`Successfully indexed ${indexed} notes!`);
+            if (indexed > 0) {
+                new Notice(`Successfully indexed ${indexed} notes!` + (failed > 0 ? ` (${failed} failed)` : ''));
+            } else {
+                new Notice('No notes were indexed. Check console for errors.');
+            }
+
             await this.updateIndexStatus();
 
         } catch (error) {
-            new Notice('Indexing failed: ' + error.message);
-            console.error(error);
+            new Notice('Indexing failed: ' + error.message, 10000);
+            console.error('Indexing error:', error);
         } finally {
             this.isIndexing = false;
             this.indexButton.disabled = false;
             this.indexButton.setText('Re-index Vault');
+
+            console.log(`Indexing complete: ${indexed} successful, ${failed} failed`);
         }
     }
 

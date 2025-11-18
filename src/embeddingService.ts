@@ -37,19 +37,25 @@ export class EmbeddingService {
 
     private async _initializeInternal(): Promise<void> {
         try {
+            console.log('Starting embedding model initialization...');
             new Notice('Loading embedding model (first time only)...', 3000);
 
             // Dynamically import transformers.js from CDN
+            console.log('Importing transformers.js from CDN...');
             // @ts-expect-error - Dynamic CDN import not in type system
             const { pipeline } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.0');
+            console.log('Transformers.js loaded successfully');
 
             // Initialize the feature extraction pipeline
+            console.log('Initializing feature extraction pipeline...');
             this.pipeline = await pipeline('feature-extraction', this.model);
+            console.log('Pipeline initialized successfully');
 
             new Notice('Embedding model ready!');
         } catch (error) {
             console.error('Failed to initialize embedding model:', error);
-            throw new Error('Failed to load embedding model. Check console for details.');
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            throw new Error(`Failed to load embedding model: ${errorMsg}. This might be a network/CORS issue. Check browser console for details.`);
         }
     }
 
