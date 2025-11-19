@@ -19,3 +19,6 @@ Thumbs.db
 
 # Build files
 dist/
+
+# Embedding server (separate project - see systematics-embeddings repo)
+embedding-server/

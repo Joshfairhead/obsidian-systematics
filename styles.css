@@ -176,8 +176,14 @@
     color: var(--text-normal);
 }
 
+.input-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
 .search-section input {
-    width: calc(100% - 100px);
+    flex: 1;
     padding: 8px 12px;
     border: 1px solid var(--background-modifier-border);
     border-radius: 4px;
@@ -187,7 +193,6 @@
 }
 
 .search-section button {
-    margin-left: 10px;
     padding: 8px 16px;
     background-color: var(--interactive-accent);
     color: white;
@@ -195,10 +200,20 @@
     border-radius: 4px;
     cursor: pointer;
     font-weight: 500;
+    white-space: nowrap;
 }
 
 .search-section button:hover {
     background-color: var(--interactive-accent-hover);
+}
+
+.derive-topic-button {
+    background-color: var(--background-modifier-border);
+    color: var(--text-normal);
+}
+
+.derive-topic-button:hover {
+    background-color: var(--background-modifier-hover);
 }
 
 /* Two-column layout */
@@ -349,12 +364,15 @@
 }
 
 .contextual-search-canvas {
-    width: 100%;
-    height: 400px;
+    /* Don't set width/height in CSS - let canvas element control its own dimensions */
+    /* This prevents stretching/distortion */
+    max-width: 100%;
+    aspect-ratio: 1 / 1; /* Maintain square shape */
     border: 2px solid var(--background-modifier-border);
     border-radius: 8px;
     background-color: var(--background-primary-alt);
     cursor: default;
+    display: block;
 }
 
 .theme-dark .contextual-search-canvas {
@@ -378,4 +396,84 @@
     .notes-list {
         max-height: 300px;
     }
+}
+
+/* Semantic Monad View Styles */
+.systematics-semantic-monad {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    background-color: var(--background-primary);
+    overflow-y: auto;
+}
+
+.semantic-monad-header h2 {
+    margin: 0 0 15px 0;
+    color: var(--text-normal);
+    font-size: 1.5em;
+}
+
+.controls-section {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+    margin-bottom: 15px;
+    padding: 10px;
+    background-color: var(--background-secondary);
+    border-radius: 6px;
+}
+
+.index-status {
+    flex: 1;
+    font-size: 0.9em;
+    color: var(--text-muted);
+}
+
+.index-vault-button {
+    padding: 6px 12px;
+    background-color: var(--interactive-accent);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.index-vault-button:hover {
+    background-color: var(--interactive-accent-hover);
+}
+
+.index-vault-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.semantic-monad-canvas {
+    max-width: 100%;
+    aspect-ratio: 1 / 1;
+    border: 2px solid var(--interactive-accent);
+    border-radius: 8px;
+    background-color: var(--background-primary-alt);
+    cursor: pointer;
+    display: block;
+}
+
+.theme-dark .semantic-monad-canvas {
+    background-color: #1a1a1a;
+}
+
+.theme-light .semantic-monad-canvas {
+    background-color: #ffffff;
+}
+
+.concept-tag.clickable {
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.concept-tag.clickable:hover {
+    background-color: var(--interactive-accent);
+    color: white;
+    transform: scale(1.05);
 }
