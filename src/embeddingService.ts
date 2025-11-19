@@ -1,89 +1,114 @@
 /**
- * Embedding Service - Generates semantic embeddings using Transformers.js
- * Loads model from CDN to keep plugin bundle size small
+ * Embedding Service - Generates semantic embeddings via HTTP to Rust server
+ * Connects to local embedding server (systematics-embeddings) on localhost:8765
  */
 
 import { Notice } from 'obsidian';
 import { Embedding } from './semanticTypes';
 
+interface EmbedRequest {
+    text: string;
+}
+
+interface EmbedResponse {
+    embedding: number[];
+    dimensions: number;
+}
+
+interface IndexRequest {
+    id: string;
+    text: string;
+    metadata?: any;
+}
+
+interface IndexResponse {
+    success: boolean;
+    id: string;
+}
+
+interface SearchRequest {
+    query: string;
+    limit: number;
+}
+
+interface SearchResult {
+    id: string;
+    score: number;
+    text: string;
+}
+
+interface SearchResponse {
+    results: SearchResult[];
+}
+
+interface HealthResponse {
+    status: string;
+    model: string;
+    dimensions: number;
+}
+
 export class EmbeddingService {
-    private pipeline: any = null;
-    private model: string = 'Xenova/all-MiniLM-L6-v2';  // 384 dimensions, fast
+    private serverUrl: string = 'http://localhost:8765';
     private dimensions: number = 384;
-    private isInitializing: boolean = false;
-    private initPromise: Promise<void> | null = null;
+    private isHealthy: boolean = false;
+    private modelName: string = 'all-MiniLM-L6-v2';
 
     constructor() {}
 
     /**
-     * Initialize the embedding model
-     * Downloads model on first use (~23MB cached in browser)
+     * Initialize by checking server health
      */
     async initialize(): Promise<void> {
-        if (this.pipeline) return;
-        if (this.isInitializing && this.initPromise) {
-            return this.initPromise;
-        }
-
-        this.isInitializing = true;
-        this.initPromise = this._initializeInternal();
-
         try {
-            await this.initPromise;
-        } finally {
-            this.isInitializing = false;
-        }
-    }
+            // Create timeout controller
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-    private async _initializeInternal(): Promise<void> {
-        try {
-            console.log('Starting embedding model initialization...');
-            new Notice('Loading embedding model (first time only)...', 3000);
-
-            // Dynamically import transformers.js from CDN
-            console.log('Importing transformers.js from CDN...');
-            // @ts-expect-error - Dynamic CDN import not in type system
-            const transformersModule = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.0');
-            console.log('Transformers.js module loaded:', Object.keys(transformersModule));
-
-            // Access the pipeline function
-            const { pipeline, env } = transformersModule;
-
-            if (!pipeline) {
-                throw new Error('Pipeline function not found in transformers module');
-            }
-
-            console.log('Configuring transformers.js environment...');
-            // Configure for local execution
-            if (env) {
-                env.allowLocalModels = false;
-                env.useBrowserCache = true;
-                console.log('Environment configured');
-            }
-
-            // Initialize the feature extraction pipeline
-            console.log('Initializing feature extraction pipeline...');
-            this.pipeline = await pipeline('feature-extraction', this.model, {
-                progress_callback: (progress: any) => {
-                    console.log('Model download progress:', progress);
-                }
+            const response = await fetch(`${this.serverUrl}/health`, {
+                method: 'GET',
+                signal: controller.signal,
             });
-            console.log('Pipeline initialized successfully');
 
-            new Notice('Embedding model ready!');
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+            }
+
+            const health: HealthResponse = await response.json();
+
+            if (health.status !== 'ok') {
+                throw new Error(`Server health check failed: ${health.status}`);
+            }
+
+            this.dimensions = health.dimensions;
+            this.modelName = health.model;
+            this.isHealthy = true;
+
+            console.log(`Embedding server connected: ${health.model} (${health.dimensions}d)`);
         } catch (error) {
-            console.error('Failed to initialize embedding model:', error);
-            console.error('Error stack:', error instanceof Error ? error.stack : 'No stack');
+            this.isHealthy = false;
             const errorMsg = error instanceof Error ? error.message : String(error);
-            throw new Error(`Failed to load embedding model: ${errorMsg}. Check console for full error details.`);
+
+            // Provide helpful error message
+            if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError')) {
+                throw new Error(
+                    'Cannot connect to embedding server. Please ensure:\n' +
+                    '1. The Rust server is running: ./target/release/systematics-embeddings\n' +
+                    '2. The server is listening on http://localhost:8765\n' +
+                    '3. No firewall is blocking the connection'
+                );
+            }
+
+            throw new Error(`Embedding server error: ${errorMsg}`);
         }
     }
 
     /**
-     * Generate embedding for a single text
+     * Generate embedding for a single text via HTTP
      */
     async embed(text: string): Promise<number[]> {
-        if (!this.pipeline) {
+        if (!this.isHealthy) {
             await this.initialize();
         }
 
@@ -91,56 +116,150 @@ export class EmbeddingService {
             // Truncate text if too long (model has 512 token limit)
             const truncated = this.truncateText(text, 500);
 
-            // Generate embedding
-            const output = await this.pipeline(truncated, {
-                pooling: 'mean',
-                normalize: true
+            const request: EmbedRequest = { text: truncated };
+
+            // Create timeout controller
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+            const response = await fetch(`${this.serverUrl}/embed`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(request),
+                signal: controller.signal,
             });
 
-            // Convert to plain array
-            const embedding = Array.from(output.data) as number[];
+            clearTimeout(timeoutId);
 
-            return embedding;
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+
+            const data: EmbedResponse = await response.json();
+
+            if (!data.embedding || !Array.isArray(data.embedding)) {
+                throw new Error('Invalid embedding response from server');
+            }
+
+            return data.embedding;
+
         } catch (error) {
             console.error('Embedding generation failed:', error);
+            this.isHealthy = false; // Mark as unhealthy to retry initialization
             throw error;
         }
     }
 
     /**
-     * Generate embeddings for multiple texts (more efficient)
+     * Generate embeddings for multiple texts (more efficient via batching)
      */
     async embedBatch(texts: string[], batchSize: number = 32): Promise<number[][]> {
-        if (!this.pipeline) {
+        if (!this.isHealthy) {
             await this.initialize();
         }
 
         const embeddings: number[][] = [];
 
-        // Process in batches to avoid memory issues
+        // Process in batches to avoid overwhelming the server
         for (let i = 0; i < texts.length; i += batchSize) {
             const batch = texts.slice(i, i + batchSize);
-            const truncated = batch.map(t => this.truncateText(t, 500));
 
-            const output = await this.pipeline(truncated, {
-                pooling: 'mean',
-                normalize: true
-            });
+            // Process batch in parallel
+            const batchPromises = batch.map(text => this.embed(text));
+            const batchResults = await Promise.all(batchPromises);
 
-            // Extract embeddings from batch output
-            if (batch.length === 1) {
-                embeddings.push(Array.from(output.data) as number[]);
-            } else {
-                for (let j = 0; j < batch.length; j++) {
-                    const start = j * this.dimensions;
-                    const end = start + this.dimensions;
-                    const embedding = Array.from(output.data.slice(start, end)) as number[];
-                    embeddings.push(embedding);
-                }
+            embeddings.push(...batchResults);
+
+            // Small delay between batches to avoid overwhelming server
+            if (i + batchSize < texts.length) {
+                await new Promise(resolve => setTimeout(resolve, 100));
             }
         }
 
         return embeddings;
+    }
+
+    /**
+     * Index a document on the server (optional - server maintains its own index)
+     */
+    async indexDocument(id: string, text: string, metadata?: any): Promise<boolean> {
+        if (!this.isHealthy) {
+            await this.initialize();
+        }
+
+        try {
+            const request: IndexRequest = { id, text, metadata };
+
+            // Create timeout controller
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+            const response = await fetch(`${this.serverUrl}/index`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(request),
+                signal: controller.signal,
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+
+            const data: IndexResponse = await response.json();
+            return data.success;
+
+        } catch (error) {
+            console.error('Document indexing failed:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Search using the server's index (optional - plugin uses local IndexedDB)
+     */
+    async search(query: string, limit: number = 10): Promise<SearchResult[]> {
+        if (!this.isHealthy) {
+            await this.initialize();
+        }
+
+        try {
+            const request: SearchRequest = { query, limit };
+
+            // Create timeout controller
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+            const response = await fetch(`${this.serverUrl}/search`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(request),
+                signal: controller.signal,
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+
+            const data: SearchResponse = await response.json();
+            return data.results;
+
+        } catch (error) {
+            console.error('Server search failed:', error);
+            throw error;
+        }
     }
 
     /**
@@ -158,7 +277,7 @@ export class EmbeddingService {
      * Check if service is ready
      */
     isReady(): boolean {
-        return this.pipeline !== null;
+        return this.isHealthy;
     }
 
     /**
@@ -166,9 +285,16 @@ export class EmbeddingService {
      */
     getModelInfo() {
         return {
-            name: this.model,
+            name: this.modelName,
             dimensions: this.dimensions
         };
+    }
+
+    /**
+     * Get server URL (for debugging)
+     */
+    getServerUrl(): string {
+        return this.serverUrl;
     }
 
     /**

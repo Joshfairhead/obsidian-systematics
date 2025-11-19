@@ -185,20 +185,21 @@ export class SemanticMonadView extends ItemView {
         let failed = 0;
 
         try {
-            // Initialize embedding service first
-            this.statusDiv.setText('Loading AI model from CDN...');
-            new Notice('Loading AI model (first time takes ~30 seconds)...', 5000);
+            // Initialize embedding service first (connects to local server)
+            this.statusDiv.setText('Connecting to embedding server...');
+            new Notice('Connecting to local embedding server (localhost:8765)...', 4000);
 
             try {
                 await this.embeddingService.initialize();
-                this.statusDiv.setText('AI model loaded! Starting to index...');
-                new Notice('AI model ready! Starting indexing...', 3000);
+                const modelInfo = this.embeddingService.getModelInfo();
+                this.statusDiv.setText(`Connected to ${modelInfo.name}! Starting to index...`);
+                new Notice(`Embedding server ready! Using ${modelInfo.name}`, 3000);
             } catch (error) {
-                const msg = `Failed to load AI model: ${error.message}`;
+                const msg = `Failed to connect to embedding server: ${error.message}`;
                 this.statusDiv.setText(msg);
-                new Notice('AI model failed to load. This feature requires internet access and may not work in all Obsidian environments.', 15000);
+                new Notice('Cannot connect to embedding server. Please ensure the Rust server is running on localhost:8765', 15000);
                 console.error('Embedding service initialization failed:', error);
-                throw new Error('AI embeddings unavailable: ' + error.message + '. Try checking if you have internet access and that Obsidian can access external CDNs.');
+                throw new Error('Embedding server unavailable: ' + error.message);
             }
 
             const files = this.app.vault.getMarkdownFiles();
@@ -315,6 +316,11 @@ export class SemanticMonadView extends ItemView {
         try {
             new Notice('Searching semantic space...');
 
+            // Ensure server is connected
+            if (!this.embeddingService.isReady()) {
+                await this.embeddingService.initialize();
+            }
+
             // Generate query embedding
             const queryEmbedding = await this.embeddingService.embed(query);
 
@@ -356,8 +362,13 @@ export class SemanticMonadView extends ItemView {
             new Notice(`Found ${nearestNotes.length} semantically related notes`);
 
         } catch (error) {
-            new Notice('Search failed: ' + error.message);
-            console.error(error);
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            if (errorMsg.includes('embedding server') || errorMsg.includes('localhost:8765')) {
+                new Notice('Search failed: Cannot connect to embedding server. Please ensure the Rust server is running.', 10000);
+            } else {
+                new Notice('Search failed: ' + errorMsg, 8000);
+            }
+            console.error('Semantic search error:', error);
         }
     }
 
