@@ -1,7 +1,7 @@
 import { App, Plugin, PluginSettingTab, Setting, WorkspaceLeaf } from 'obsidian';
 import { SystematicsSettings } from './src/types';
 import { SystematicsGraphView, VIEW_TYPE_SYSTEMATICS } from './src/graphView';
-import { ContextualSearchView, VIEW_TYPE_CONTEXTUAL_SEARCH } from './src/contextualSearchView';
+import { SemanticMonadView, VIEW_TYPE_SEMANTIC_MONAD } from './src/semanticMonadView';
 
 const DEFAULT_SETTINGS: SystematicsSettings = {
     currentGraph: 3,
@@ -21,8 +21,8 @@ export default class SystematicsPlugin extends Plugin {
         );
 
         this.registerView(
-            VIEW_TYPE_CONTEXTUAL_SEARCH,
-            (leaf) => new ContextualSearchView(leaf, this)
+            VIEW_TYPE_SEMANTIC_MONAD,
+            (leaf) => new SemanticMonadView(leaf, this)
         );
 
         // Add ribbon icons
@@ -30,8 +30,8 @@ export default class SystematicsPlugin extends Plugin {
             this.activateView();
         });
 
-        this.addRibbonIcon('search', 'Open Contextual Search', () => {
-            this.activateContextualSearch();
+        this.addRibbonIcon('search', 'Open Semantic Search', () => {
+            this.activateSemanticMonad();
         });
 
         // Add commands to open the views
@@ -44,10 +44,10 @@ export default class SystematicsPlugin extends Plugin {
         });
 
         this.addCommand({
-            id: 'open-contextual-search',
-            name: 'Open Contextual Search',
+            id: 'open-semantic-search',
+            name: 'Open Semantic Search',
             callback: () => {
-                this.activateContextualSearch();
+                this.activateSemanticMonad();
             }
         });
 
@@ -77,11 +77,11 @@ export default class SystematicsPlugin extends Plugin {
         }
     }
 
-    async activateContextualSearch() {
+    async activateSemanticMonad() {
         const { workspace } = this.app;
 
         let leaf: WorkspaceLeaf | null = null;
-        const leaves = workspace.getLeavesOfType(VIEW_TYPE_CONTEXTUAL_SEARCH);
+        const leaves = workspace.getLeavesOfType(VIEW_TYPE_SEMANTIC_MONAD);
 
         if (leaves.length > 0) {
             // A leaf with our view already exists, use that
@@ -90,7 +90,7 @@ export default class SystematicsPlugin extends Plugin {
             // Our view could not be found in the workspace, create a new leaf
             // in the right sidebar for it
             leaf = workspace.getRightLeaf(false);
-            await leaf?.setViewState({ type: VIEW_TYPE_CONTEXTUAL_SEARCH, active: true });
+            await leaf?.setViewState({ type: VIEW_TYPE_SEMANTIC_MONAD, active: true });
         }
 
         // Reveal the leaf in case it is in a collapsed sidebar
