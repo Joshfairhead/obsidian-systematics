@@ -7,6 +7,7 @@ An Obsidian plugin for viewing and organizing notes systematically through compl
 - **Graph Visualization**: Display complete graphs from K3 (triangle) to K12 (dodecagon)
 - **Interactive Nodes**: Click on nodes to assign custom labels and link them to notes
 - **Note Navigation**: Quickly navigate to linked notes directly from the graph view
+- **Semantic Search**: AI-powered semantic search with monad visualization (requires embedding server)
 - **Persistent Settings**: Your node labels and note links are saved across sessions
 - **Beautiful Rendering**: Clean, responsive canvas-based visualization that adapts to your theme
 
@@ -36,6 +37,34 @@ An Obsidian plugin for viewing and organizing notes systematically through compl
    ```
 
 3. Restart Obsidian and enable the plugin in Settings → Community Plugins
+
+## Semantic Search Setup (Optional)
+
+The semantic search feature requires a local embedding server to be running:
+
+1. **Get the embedding server**:
+   ```bash
+   git clone https://github.com/Joshfairhead/systematics-embeddings.git
+   cd systematics-embeddings
+   ```
+
+2. **Setup and run** (see the [embedding server README](https://github.com/Joshfairhead/systematics-embeddings) for details):
+   ```bash
+   # Download the AI model (one-time setup)
+   pip install optimum[exporters] transformers torch
+   python download-model.py
+
+   # Build and run the server
+   cargo build --release
+   ./target/release/systematics-embeddings
+   ```
+
+3. **Use semantic search** in Obsidian:
+   - Click the magnifying glass icon (🔍) in the ribbon
+   - Click "Index Vault" to index your notes
+   - Search semantically by concepts and ideas!
+
+The server runs locally on your machine - no cloud services, no API costs.
 
 ## Usage
 
