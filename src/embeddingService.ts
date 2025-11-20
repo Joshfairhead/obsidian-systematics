@@ -60,9 +60,14 @@ export class EmbeddingService {
      */
     async initialize(): Promise<void> {
         try {
+            console.log(`[EmbeddingService] Attempting to connect to ${this.serverUrl}/health`);
+
             // Create timeout controller
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000);
+            const timeoutId = setTimeout(() => {
+                console.log('[EmbeddingService] Request timed out after 5 seconds');
+                controller.abort();
+            }, 5000);
 
             const response = await fetch(`${this.serverUrl}/health`, {
                 method: 'GET',
@@ -70,12 +75,14 @@ export class EmbeddingService {
             });
 
             clearTimeout(timeoutId);
+            console.log(`[EmbeddingService] Received response: ${response.status} ${response.statusText}`);
 
             if (!response.ok) {
                 throw new Error(`Server returned ${response.status}: ${response.statusText}`);
             }
 
             const health: HealthResponse = await response.json();
+            console.log('[EmbeddingService] Health check response:', health);
 
             if (health.status !== 'ok') {
                 throw new Error(`Server health check failed: ${health.status}`);
@@ -85,18 +92,28 @@ export class EmbeddingService {
             this.modelName = health.model;
             this.isHealthy = true;
 
-            console.log(`Embedding server connected: ${health.model} (${health.dimensions}d)`);
+            console.log(`[EmbeddingService] ✅ Connected: ${health.model} (${health.dimensions}d)`);
         } catch (error) {
             this.isHealthy = false;
             const errorMsg = error instanceof Error ? error.message : String(error);
+            console.error('[EmbeddingService] Connection failed:', error);
+
+            // Check if it's an abort error
+            if (error instanceof Error && error.name === 'AbortError') {
+                throw new Error(
+                    'Connection timeout. The embedding server did not respond within 5 seconds.\n' +
+                    'Please check if the server is running on http://localhost:8765'
+                );
+            }
 
             // Provide helpful error message
-            if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError')) {
+            if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError') || errorMsg.includes('TypeError')) {
                 throw new Error(
                     'Cannot connect to embedding server. Please ensure:\n' +
                     '1. The Rust server is running: ./target/release/systematics-embeddings\n' +
                     '2. The server is listening on http://localhost:8765\n' +
-                    '3. No firewall is blocking the connection'
+                    '3. No firewall is blocking the connection\n' +
+                    '4. Try accessing http://localhost:8765/health in your browser to test'
                 );
             }
 
