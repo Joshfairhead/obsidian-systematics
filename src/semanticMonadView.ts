@@ -195,11 +195,20 @@ export class SemanticMonadView extends ItemView {
                 this.statusDiv.setText(`Connected to ${modelInfo.name}! Starting to index...`);
                 new Notice(`Embedding server ready! Using ${modelInfo.name}`, 3000);
             } catch (error) {
-                const msg = `Failed to connect to embedding server: ${error.message}`;
-                this.statusDiv.setText(msg);
-                new Notice('Cannot connect to embedding server. Please ensure the Rust server is running on localhost:8765', 15000);
+                const errorMsg = error instanceof Error ? error.message : String(error);
+                const displayMsg = `❌ Connection Failed:\n${errorMsg}`;
+
+                this.statusDiv.setText(displayMsg);
+                this.statusDiv.style.color = 'var(--text-error)';
+                this.statusDiv.style.whiteSpace = 'pre-wrap';
+                this.statusDiv.style.fontSize = '12px';
+
+                new Notice(`❌ Embedding Server Error:\n\n${errorMsg}`, 20000);
                 console.error('Embedding service initialization failed:', error);
-                throw new Error('Embedding server unavailable: ' + error.message);
+                console.error('Error type:', error instanceof Error ? error.constructor.name : typeof error);
+                console.error('Full error:', error);
+
+                throw new Error('Embedding server unavailable: ' + errorMsg);
             }
 
             const files = this.app.vault.getMarkdownFiles();
