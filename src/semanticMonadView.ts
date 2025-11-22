@@ -292,6 +292,17 @@ export class SemanticMonadView extends ItemView {
         // Generate embedding
         const embedding = await this.embeddingService.embed(content);
 
+        // Debug: Log first indexed note to verify embeddings are diverse
+        const stats = await this.vectorIndex.getStats();
+        if (stats.indexedNotes < 3) {
+            console.log(`Indexed note #${stats.indexedNotes + 1}: ${file.basename}`, {
+                embeddingLength: embedding.length,
+                embeddingPreview: embedding.slice(0, 5),
+                embeddingSum: embedding.reduce((a, b) => a + b, 0),
+                contentPreview: content.slice(0, 100)
+            });
+        }
+
         // Extract metadata
         const metadata = {
             title: file.basename,
@@ -330,9 +341,20 @@ export class SemanticMonadView extends ItemView {
 
             // Generate query embedding
             const queryEmbedding = await this.embeddingService.embed(query);
+            console.log('Query embedding generated:', {
+                query,
+                embeddingLength: queryEmbedding.length,
+                embeddingPreview: queryEmbedding.slice(0, 5),
+                embeddingSum: queryEmbedding.reduce((a, b) => a + b, 0)
+            });
 
             // Find nearest notes
             const nearestNotes = await this.vectorIndex.findNearest(queryEmbedding, 50);
+            console.log('Nearest notes found:', {
+                count: nearestNotes.length,
+                topScores: nearestNotes.slice(0, 5).map(n => ({ path: n.path, score: n.score })),
+                scoreDiversity: new Set(nearestNotes.slice(0, 10).map(n => n.score.toFixed(3))).size
+            });
 
             if (nearestNotes.length === 0) {
                 new Notice('No indexed notes found. Please index your vault first.');
