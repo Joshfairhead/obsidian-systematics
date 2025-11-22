@@ -33,6 +33,7 @@ export class SemanticMonadView extends ItemView {
     currentMonad: SemanticMonad | null = null;
     isIndexing: boolean = false;
     conceptPositions: Map<string, Point2D> = new Map();
+    conceptVelocities: Map<string, { vx: number; vy: number }> = new Map();
     hoveredConcept: string | null = null;
     animationFrame: number | null = null;
     animationTime: number = 0;
@@ -114,7 +115,7 @@ export class SemanticMonadView extends ItemView {
 
         titleRow.createEl('h2', { text: 'Latent Space Explorer' });
         const versionEl = titleRow.createEl('span', {
-            text: 'v0.3.0',
+            text: 'v0.4.0',
             cls: 'version-badge'
         });
         versionEl.style.fontSize = '11px';
@@ -212,17 +213,20 @@ export class SemanticMonadView extends ItemView {
     resizeCanvas() {
         const parent = this.canvas.parentElement;
         if (parent) {
-            // Match width to parent (left column)
+            // Match width to parent column (concepts panel below it)
             const parentWidth = parent.clientWidth || 400;
-            // Make it square, bounded by reasonable limits
-            const size = Math.min(Math.max(parentWidth - 20, 300), 500);
+
+            // Make canvas square and fill the parent width
+            const size = Math.min(Math.max(parentWidth - 10, 300), 600);
 
             this.canvas.width = size;
             this.canvas.height = size;
-            this.canvas.style.width = '100%';  // Responsive width
-            this.canvas.style.height = 'auto'; // Maintain aspect ratio
-            this.canvas.style.maxWidth = '500px';
-            this.canvas.style.maxHeight = '500px';
+
+            // Use CSS to make it fill parent width while maintaining aspect ratio
+            this.canvas.style.width = '100%';
+            this.canvas.style.height = 'auto';
+            this.canvas.style.display = 'block';
+            this.canvas.style.margin = '0 auto';
 
             this.draw();
         }
@@ -696,48 +700,114 @@ export class SemanticMonadView extends ItemView {
 
     /**
      * Project embeddings to 2D for visualization
-     * Using simple circular layout for readability (no clustering)
+     * Using force-directed layout with repulsion (like Obsidian graph)
      */
     async projectToVisualization(
         queryEmbedding: number[],
         concepts: ConceptNode[],
         topNotes: ScoredNote[]
     ): Promise<Point2D[]> {
-        // Use simple circular layout - evenly space concepts around circle
-        // This ensures no overlap and maximum readability
-
         const center: Point2D = { x: 0, y: 0, label: 'query' };
         const others: Point2D[] = [];
 
         const count = concepts.length;
-        const radius = 0.8; // Distance from center
+        const radius = 0.7; // Base distance from center
 
+        // Initialize positions in a circle with some randomness
         for (let i = 0; i < count; i++) {
-            const angle = (i / count) * 2 * Math.PI;
+            const angle = (i / count) * 2 * Math.PI + (Math.random() - 0.5) * 0.3;
+            const r = radius + (Math.random() - 0.5) * 0.2;
             const point: Point2D = {
-                x: Math.cos(angle) * radius,
-                y: Math.sin(angle) * radius,
+                x: Math.cos(angle) * r,
+                y: Math.sin(angle) * r,
                 label: concepts[i].term
             };
             others.push(point);
         }
 
-        // Store positions for click detection
+        // Store positions and initialize velocities
         this.conceptPositions.clear();
+        this.conceptVelocities.clear();
         others.forEach((point, i) => {
             concepts[i].position2D = point;
             this.conceptPositions.set(concepts[i].term, point);
+            this.conceptVelocities.set(concepts[i].term, { vx: 0, vy: 0 });
         });
 
         return [center, ...others];
     }
 
     /**
-     * Start animation loop for gentle drift
+     * Apply physics forces to concepts (repulsion + center attraction)
+     */
+    applyForces() {
+        if (!this.currentMonad) return;
+
+        const concepts = this.currentMonad.concepts;
+        const repulsionStrength = 0.05;
+        const centerAttractionStrength = 0.01;
+        const damping = 0.85;
+        const minDistance = 0.2; // Minimum distance between concepts
+
+        // Apply repulsion between all concepts
+        for (let i = 0; i < concepts.length; i++) {
+            const conceptA = concepts[i];
+            if (!conceptA.position2D) continue;
+
+            const velA = this.conceptVelocities.get(conceptA.term);
+            if (!velA) continue;
+
+            let fx = 0, fy = 0;
+
+            // Repulsion from other concepts
+            for (let j = 0; j < concepts.length; j++) {
+                if (i === j) continue;
+                const conceptB = concepts[j];
+                if (!conceptB.position2D) continue;
+
+                const dx = conceptA.position2D.x - conceptB.position2D.x;
+                const dy = conceptA.position2D.y - conceptB.position2D.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist < minDistance) {
+                    // Strong repulsion when too close
+                    const force = repulsionStrength / (dist + 0.01);
+                    fx += (dx / dist) * force;
+                    fy += (dy / dist) * force;
+                }
+            }
+
+            // Weak attraction to ideal circular radius (keeps from flying off)
+            const dist = Math.sqrt(
+                conceptA.position2D.x ** 2 + conceptA.position2D.y ** 2
+            );
+            const targetRadius = 0.7;
+            if (dist > 0) {
+                const centerForce = (dist - targetRadius) * centerAttractionStrength;
+                fx -= (conceptA.position2D.x / dist) * centerForce;
+                fy -= (conceptA.position2D.y / dist) * centerForce;
+            }
+
+            // Update velocity
+            velA.vx = (velA.vx + fx) * damping;
+            velA.vy = (velA.vy + fy) * damping;
+
+            // Update position
+            conceptA.position2D.x += velA.vx;
+            conceptA.position2D.y += velA.vy;
+
+            // Update stored position
+            this.conceptPositions.set(conceptA.term, conceptA.position2D);
+        }
+    }
+
+    /**
+     * Start animation loop with physics simulation
      */
     startAnimation() {
         const animate = () => {
-            this.animationTime += 0.01; // Slow increment
+            this.animationTime += 0.01;
+            this.applyForces(); // Update physics
             this.draw();
             this.animationFrame = requestAnimationFrame(animate);
         };
@@ -847,16 +917,12 @@ export class SemanticMonadView extends ItemView {
         for (const concept of this.currentMonad.concepts) {
             if (!concept.position2D) continue;
 
-            // Add gentle drift: slight rotation over time
-            const driftAngle = Math.sin(this.animationTime + concept.position2D.x) * 0.02;
-            const driftedX = concept.position2D.x * Math.cos(driftAngle) - concept.position2D.y * Math.sin(driftAngle);
-            const driftedY = concept.position2D.x * Math.sin(driftAngle) + concept.position2D.y * Math.cos(driftAngle);
-
+            // Use physics-updated position (no artificial drift needed)
             const pos = ProjectionEngine.toCanvasCoords(
-                { x: driftedX, y: driftedY, label: concept.term },
+                concept.position2D,
                 centerX,
                 centerY,
-                radius * 0.85
+                radius * 0.9
             );
 
             // Check if this concept is hovered
