@@ -380,11 +380,12 @@ export class SemanticMonadView extends ItemView {
     }
 
     /**
-     * Extract semantic concepts from notes
+     * Extract semantic concepts from notes using TF-IDF weighting
      */
     async extractSemanticConcepts(notes: ScoredNote[], queryEmbedding: number[]): Promise<ConceptNode[]> {
-        // Aggregate all words from notes
-        const termFreq: Map<string, number> = new Map();
+        // Count term frequency in query-related notes
+        const termFreqInQueryNotes: Map<string, number> = new Map();
+        const termsPerNote: Map<string, Set<string>> = new Map();
 
         for (const note of notes) {
             const file = this.app.vault.getAbstractFileByPath(note.path);
@@ -392,17 +393,44 @@ export class SemanticMonadView extends ItemView {
 
             const content = await this.app.vault.cachedRead(file);
             const words = this.extractTerms(content);
+            const uniqueWords = new Set(words);
+            termsPerNote.set(note.path, uniqueWords);
 
             for (const word of words) {
-                termFreq.set(word, (termFreq.get(word) || 0) + 1);
+                termFreqInQueryNotes.set(word, (termFreqInQueryNotes.get(word) || 0) + 1);
             }
         }
 
-        // Get top terms
-        const topTerms = Array.from(termFreq.entries())
+        // Get document frequency (how many notes contain each term) from index stats
+        const allStats = await this.vectorIndex.getStats();
+        const totalDocs = allStats.indexedNotes;
+
+        // Calculate TF-IDF scores
+        const tfidfScores: Map<string, number> = new Map();
+
+        for (const [term, tf] of termFreqInQueryNotes.entries()) {
+            // Count how many of the query-related notes contain this term
+            let df = 0;
+            for (const termSet of termsPerNote.values()) {
+                if (termSet.has(term)) df++;
+            }
+
+            // TF-IDF: term frequency * inverse document frequency
+            // Use query-related notes as corpus for better relevance
+            const idf = Math.log((notes.length + 1) / (df + 1));
+            const tfidf = tf * idf;
+
+            // Boost terms that appear in query embedding space
+            // (will be refined by semantic similarity later)
+            tfidfScores.set(term, tfidf);
+        }
+
+        // Get top terms by TF-IDF score
+        const topTerms = Array.from(tfidfScores.entries())
             .sort((a, b) => b[1] - a[1])
-            .slice(0, 15)
-            .map(([term]) => term);
+            .slice(0, 20)  // Get more candidates
+            .map(([term]) => term)
+            .filter(term => term.length > 3);  // Ensure quality terms
 
         // Embed concepts
         const conceptEmbeddings = await this.embeddingService.embedBatch(topTerms);
@@ -432,15 +460,29 @@ export class SemanticMonadView extends ItemView {
     private extractTerms(content: string): string[] {
         const stopWords = new Set([
             'the', 'be', 'to', 'of', 'and', 'a', 'in', 'that', 'have',
-            'it', 'for', 'not', 'on', 'with', 'as', 'you', 'do', 'at'
+            'it', 'for', 'not', 'on', 'with', 'as', 'you', 'do', 'at',
+            'this', 'but', 'his', 'from', 'they', 'we', 'say', 'her', 'she',
+            'or', 'an', 'will', 'my', 'one', 'all', 'would', 'there', 'their',
+            'what', 'so', 'up', 'out', 'if', 'about', 'who', 'get', 'which',
+            'go', 'me', 'when', 'make', 'can', 'like', 'time', 'no', 'just',
+            'him', 'know', 'take', 'people', 'into', 'year', 'your', 'good',
+            'some', 'could', 'them', 'see', 'other', 'than', 'then', 'now',
+            'look', 'only', 'come', 'its', 'over', 'think', 'also', 'back',
+            'after', 'use', 'two', 'how', 'our', 'work', 'first', 'well',
+            'way', 'even', 'new', 'want', 'because', 'any', 'these', 'give',
+            'day', 'most', 'us', 'is', 'was', 'are', 'been', 'has', 'had',
+            'were', 'said', 'did', 'having', 'may', 'should', 'does', 'being',
+            'such', 'through', 'where', 'much', 'those', 'very', 'here',
+            'yeah', 'really', 'something', 'things', 'thing', 'more', 'many'
         ]);
 
         return content
             .toLowerCase()
             .replace(/[#*_`\[\]()]/g, ' ')
             .split(/\s+/)
-            .filter(w => w.length > 4 && !stopWords.has(w) && !/^\d+$/.test(w))
-            .map(w => w.replace(/[^a-z0-9]/g, ''));
+            .filter(w => w.length > 3 && !stopWords.has(w) && !/^\d+$/.test(w))
+            .map(w => w.replace(/[^a-z0-9]/g, ''))
+            .filter(w => w.length > 3); // Re-filter after cleanup
     }
 
     /**
