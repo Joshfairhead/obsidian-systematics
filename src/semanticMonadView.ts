@@ -121,7 +121,7 @@ export class SemanticMonadView extends ItemView {
 
         titleRow.createEl('h2', { text: 'Latent Space Explorer' });
         const versionEl = titleRow.createEl('span', {
-            text: 'v0.4.2',
+            text: 'v0.4.3',
             cls: 'version-badge'
         });
         versionEl.style.fontSize = '11px';

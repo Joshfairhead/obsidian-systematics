@@ -61,11 +61,12 @@ Now generate ${count} terms for "${query}":`;
                 .split(/[,\n]/)  // Split by comma OR newline
                 .map((term: string) => term.trim().toLowerCase())
                 .map((term: string) => term.replace(/^[-\d.)\s]+/, ''))  // Remove leading numbers/bullets
-                .map((term: string) => term.replace(/[^a-z-\s]/g, ''))  // Remove special chars except hyphens
+                .map((term: string) => term.replace(/[^a-z-\s]/g, ''))  // Remove special chars except hyphens and spaces
                 .map((term: string) => term.trim())
-                .filter((term: string) => term.length > 2 && term.length < 30)
+                .map((term: string) => term.replace(/\s+/g, '-'))  // Convert spaces to hyphens for multi-word terms
+                .filter((term: string) => term.length > 2 && term.length < 35)  // Allow slightly longer for multi-word
                 .filter((term: string) => !term.match(/^(example|here|are|the|terms|for|now|generate|related)/))
-                .filter((term: string) => term.match(/^[a-z][a-z-]*$/))  // Must start with letter, allow hyphens
+                .filter((term: string) => term.match(/^[a-z][a-z-]*$/))  // Single word or hyphenated terms
                 .slice(0, count);
 
             console.log(`🦙 Ollama parsed ${terms.length} concepts for "${query}":`, terms.slice(0, 10));
