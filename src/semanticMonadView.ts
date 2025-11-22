@@ -459,6 +459,7 @@ export class SemanticMonadView extends ItemView {
      */
     private extractTerms(content: string): string[] {
         const stopWords = new Set([
+            // Common words
             'the', 'be', 'to', 'of', 'and', 'a', 'in', 'that', 'have',
             'it', 'for', 'not', 'on', 'with', 'as', 'you', 'do', 'at',
             'this', 'but', 'his', 'from', 'they', 'we', 'say', 'her', 'she',
@@ -473,16 +474,44 @@ export class SemanticMonadView extends ItemView {
             'day', 'most', 'us', 'is', 'was', 'are', 'been', 'has', 'had',
             'were', 'said', 'did', 'having', 'may', 'should', 'does', 'being',
             'such', 'through', 'where', 'much', 'those', 'very', 'here',
-            'yeah', 'really', 'something', 'things', 'thing', 'more', 'many'
+            'yeah', 'really', 'something', 'things', 'thing', 'more', 'many',
+            // Additional generic words
+            'mean', 'means', 'kind', 'sort', 'type', 'types', 'maybe', 'perhaps',
+            'question', 'questions', 'answer', 'answers', 'seems', 'seem',
+            'might', 'must', 'shall', 'need', 'needs', 'needed',
+            'probably', 'actually', 'basically', 'literally', 'generally',
+            'usually', 'often', 'sometimes', 'always', 'never',
+            'every', 'each', 'either', 'neither', 'both', 'few', 'several',
+            'between', 'among', 'before', 'during', 'within', 'without',
+            'against', 'since', 'until', 'while', 'though', 'although',
+            'however', 'therefore', 'thus', 'hence', 'whether',
+            'going', 'doing', 'made', 'making', 'used', 'using',
+            'called', 'call', 'found', 'find', 'given', 'give',
+            'became', 'become', 'comes', 'goes', 'gone', 'went',
+            // Vague qualifiers
+            'enough', 'quite', 'rather', 'somewhat', 'fairly',
+            'pretty', 'almost', 'nearly', 'hardly', 'barely',
+            'simply', 'merely', 'certainly', 'surely', 'indeed',
+            // Common verbs
+            'think', 'thought', 'know', 'knew', 'tell', 'told',
+            'feel', 'felt', 'show', 'shown', 'try', 'tried',
+            'ask', 'asked', 'help', 'helped', 'turn', 'turned'
         ]);
 
         return content
             .toLowerCase()
             .replace(/[#*_`\[\]()]/g, ' ')
             .split(/\s+/)
-            .filter(w => w.length > 3 && !stopWords.has(w) && !/^\d+$/.test(w))
+            .filter(w => {
+                // More aggressive filtering
+                if (w.length < 5) return false;  // Increased from 3 to 5
+                if (stopWords.has(w)) return false;
+                if (/^\d+$/.test(w)) return false;  // No pure numbers
+                if (w.match(/^(https?|ftp|file)/)) return false;  // No URLs
+                return true;
+            })
             .map(w => w.replace(/[^a-z0-9]/g, ''))
-            .filter(w => w.length > 3); // Re-filter after cleanup
+            .filter(w => w.length >= 5);  // Re-filter after cleanup
     }
 
     /**

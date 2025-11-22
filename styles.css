@@ -145,6 +145,8 @@
     border-radius: 6px;
     font-size: 0.9em;
     color: var(--text-muted);
+    user-select: text;
+    -webkit-user-select: text;
 }
 
 .breadcrumb-vault {
@@ -314,6 +316,8 @@
     text-decoration: none;
     cursor: pointer;
     flex: 1;
+    user-select: text;
+    -webkit-user-select: text;
 }
 
 .note-link:hover {
@@ -361,6 +365,10 @@
     color: var(--text-normal);
     font-size: 0.85em;
     font-weight: 500;
+    user-select: text;
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
 }
 
 .contextual-search-canvas {
@@ -406,6 +414,8 @@
     padding: 20px;
     background-color: var(--background-primary);
     overflow-y: auto;
+    user-select: text;
+    -webkit-user-select: text;
 }
 
 .semantic-monad-header h2 {
@@ -428,6 +438,8 @@
     flex: 1;
     font-size: 0.9em;
     color: var(--text-muted);
+    user-select: text;
+    -webkit-user-select: text;
 }
 
 .index-vault-button {
