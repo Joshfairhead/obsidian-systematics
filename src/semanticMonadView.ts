@@ -86,6 +86,9 @@ export class SemanticMonadView extends ItemView {
         const controlsSection = container.createDiv('controls-section');
 
         this.statusDiv = controlsSection.createDiv('index-status');
+        this.statusDiv.style.fontSize = '14px';
+        this.statusDiv.style.padding = '8px';
+        this.statusDiv.style.marginBottom = '8px';
         this.updateIndexStatus();
 
         this.indexButton = controlsSection.createEl('button', {
@@ -93,6 +96,14 @@ export class SemanticMonadView extends ItemView {
             cls: 'index-vault-button'
         });
         this.indexButton.addEventListener('click', () => this.indexVault());
+
+        // Debug button to inspect index
+        const debugButton = controlsSection.createEl('button', {
+            text: 'Debug Index',
+            cls: 'index-vault-button'
+        });
+        debugButton.style.backgroundColor = 'var(--background-modifier-border)';
+        debugButton.addEventListener('click', () => this.debugIndex());
 
         // Breadcrumb trail
         this.breadcrumbTrail = container.createDiv('breadcrumb-trail');
@@ -168,6 +179,62 @@ export class SemanticMonadView extends ItemView {
     }
 
     /**
+     * Debug: Inspect what's in the index
+     */
+    async debugIndex() {
+        const records = await this.vectorIndex.getAllRecords();
+
+        console.log('=== INDEX CONTENTS ===');
+        console.log(`Total indexed: ${records.length} notes`);
+
+        // Group by folder
+        const byFolder: Map<string, number> = new Map();
+        const samplePaths: string[] = [];
+
+        for (const record of records) {
+            // Extract folder path
+            const parts = record.id.split('/');
+            const folder = parts.length > 1 ? parts.slice(0, -1).join('/') : 'root';
+            byFolder.set(folder, (byFolder.get(folder) || 0) + 1);
+
+            // Collect sample paths
+            if (samplePaths.length < 20) {
+                samplePaths.push(record.id);
+            }
+        }
+
+        console.log('\n=== Notes by Folder ===');
+        const sortedFolders = Array.from(byFolder.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 30);
+
+        for (const [folder, count] of sortedFolders) {
+            console.log(`${folder}: ${count} notes`);
+        }
+
+        console.log('\n=== Sample Paths ===');
+        for (const path of samplePaths) {
+            console.log(path);
+        }
+
+        // Search for computer science related paths
+        const csRelated = records.filter(r =>
+            r.id.toLowerCase().includes('computer') ||
+            r.id.toLowerCase().includes('cs') ||
+            r.id.toLowerCase().includes('programming') ||
+            r.id.toLowerCase().includes('algorithm') ||
+            r.id.toLowerCase().includes('software')
+        );
+
+        console.log(`\n=== Computer Science Related Paths (${csRelated.length}) ===`);
+        for (const record of csRelated.slice(0, 20)) {
+            console.log(record.id);
+        }
+
+        new Notice(`Index contains ${records.length} notes. Check console for details.`);
+    }
+
+    /**
      * Index the entire vault
      */
     async indexVault() {
@@ -195,9 +262,10 @@ export class SemanticMonadView extends ItemView {
                 this.statusDiv.setText(`Connected to ${modelInfo.name}! Starting to index...`);
                 new Notice(`Embedding server ready! Using ${modelInfo.name}`, 3000);
             } catch (error) {
-                const msg = `Failed to connect to embedding server: ${error.message}`;
+                const msg = `❌ Failed to connect to embedding server: ${error.message}`;
                 this.statusDiv.setText(msg);
-                new Notice('Cannot connect to embedding server. Please ensure the Rust server is running on localhost:8765', 15000);
+                this.statusDiv.style.color = 'var(--text-error)';
+                new Notice('❌ Cannot connect to embedding server. Please ensure the Rust server is running on localhost:8765', 15000);
                 console.error('Embedding service initialization failed:', error);
                 throw new Error('Embedding server unavailable: ' + error.message);
             }
@@ -244,21 +312,24 @@ export class SemanticMonadView extends ItemView {
             }
 
             if (indexed > 0) {
-                const msg = `Indexed ${indexed} notes!` + (failed > 0 ? ` (${failed} failed)` : '');
+                const msg = `✅ Indexed ${indexed} notes!` + (failed > 0 ? ` (${failed} failed)` : '');
                 new Notice(msg);
-                this.statusDiv.setText(`Index: ${indexed} notes` + (failed > 0 ? ` (${failed} errors)` : ''));
+                this.statusDiv.setText(`✅ Index: ${indexed} notes` + (failed > 0 ? ` (${failed} errors)` : ''));
+                this.statusDiv.style.color = 'var(--text-success)';
             } else {
-                const msg = 'No notes were indexed - all failed. See errors above.';
+                const msg = '❌ No notes were indexed - all failed. See errors above.';
                 new Notice(msg, 10000);
                 this.statusDiv.setText(msg);
+                this.statusDiv.style.color = 'var(--text-error)';
             }
 
             await this.updateIndexStatus();
 
         } catch (error) {
-            const msg = 'Indexing failed: ' + error.message;
+            const msg = '❌ Indexing failed: ' + error.message;
             new Notice(msg, 10000);
             this.statusDiv.setText(msg);
+            this.statusDiv.style.color = 'var(--text-error)';
             console.error('Indexing error:', error);
         } finally {
             this.isIndexing = false;
@@ -284,6 +355,17 @@ export class SemanticMonadView extends ItemView {
 
         // Generate embedding
         const embedding = await this.embeddingService.embed(content);
+
+        // Debug: Log first indexed note to verify embeddings are diverse
+        const stats = await this.vectorIndex.getStats();
+        if (stats.indexedNotes < 3) {
+            console.log(`Indexed note #${stats.indexedNotes + 1}: ${file.basename}`, {
+                embeddingLength: embedding.length,
+                embeddingPreview: embedding.slice(0, 5),
+                embeddingSum: embedding.reduce((a, b) => a + b, 0),
+                contentPreview: content.slice(0, 100)
+            });
+        }
 
         // Extract metadata
         const metadata = {
@@ -316,6 +398,9 @@ export class SemanticMonadView extends ItemView {
         try {
             new Notice('Searching semantic space...');
 
+            // Normalize query (lowercase for matching)
+            const queryNormalized = query.toLowerCase();
+
             // Ensure server is connected
             if (!this.embeddingService.isReady()) {
                 await this.embeddingService.initialize();
@@ -323,17 +408,33 @@ export class SemanticMonadView extends ItemView {
 
             // Generate query embedding
             const queryEmbedding = await this.embeddingService.embed(query);
+            console.log('Query embedding generated:', {
+                query,
+                embeddingLength: queryEmbedding.length,
+                embeddingPreview: queryEmbedding.slice(0, 5),
+                embeddingSum: queryEmbedding.reduce((a, b) => a + b, 0)
+            });
 
-            // Find nearest notes
-            const nearestNotes = await this.vectorIndex.findNearest(queryEmbedding, 50);
+            // Find nearest notes with hybrid scoring (semantic + metadata)
+            const nearestNotes = await this.vectorIndex.findNearest(queryEmbedding, 50, queryNormalized);
+            console.log('Nearest notes found:', {
+                count: nearestNotes.length,
+                topScores: nearestNotes.slice(0, 5).map(n => ({ path: n.path, score: n.score })),
+                scoreDiversity: new Set(nearestNotes.slice(0, 10).map(n => n.score.toFixed(3))).size
+            });
 
             if (nearestNotes.length === 0) {
                 new Notice('No indexed notes found. Please index your vault first.');
                 return;
             }
 
-            // Extract concepts from top notes
-            const concepts = await this.extractSemanticConcepts(nearestNotes.slice(0, 20));
+            // Extract concepts from top notes (pass query words to filter out)
+            const queryWords = new Set(queryNormalized.split(/\s+/).filter(w => w.length > 3));
+            const concepts = await this.extractSemanticConcepts(
+                nearestNotes.slice(0, 20),
+                queryEmbedding,
+                queryWords
+            );
 
             // Project to 2D
             const projection = await this.projectToVisualization(
@@ -373,48 +474,145 @@ export class SemanticMonadView extends ItemView {
     }
 
     /**
-     * Extract semantic concepts from notes
+     * Extract semantic concepts using global distinctiveness
+     * Two-phase: broad inclusion, narrow discrimination
      */
-    async extractSemanticConcepts(notes: ScoredNote[]): Promise<ConceptNode[]> {
-        // Aggregate all words from notes
-        const termFreq: Map<string, number> = new Map();
+    async extractSemanticConcepts(
+        notes: ScoredNote[],
+        queryEmbedding: number[],
+        queryWords?: Set<string>
+    ): Promise<ConceptNode[]> {
+        // PHASE 1: COARSE - Define semantic neighborhood broadly
+        const conceptCandidates: Set<string> = new Set();
 
-        for (const note of notes) {
+        // Extract from top notes (expanded to 40 for broader scope)
+        for (const note of notes.slice(0, 40)) {
             const file = this.app.vault.getAbstractFileByPath(note.path);
             if (!(file instanceof TFile)) continue;
 
-            const content = await this.app.vault.cachedRead(file);
-            const words = this.extractTerms(content);
+            // Add title words
+            const titleWords = this.extractTerms(file.basename);
+            titleWords.forEach(w => conceptCandidates.add(w));
 
-            for (const word of words) {
-                termFreq.set(word, (termFreq.get(word) || 0) + 1);
+            // Add folder names
+            const pathParts = note.path.split('/');
+            for (const part of pathParts.slice(0, -1)) {
+                const folderWords = this.extractTerms(part);
+                folderWords.forEach(w => conceptCandidates.add(w));
+            }
+
+            // Add content words from substantial notes
+            const content = await this.app.vault.cachedRead(file);
+            if (content.length > 200) {
+                const contentWords = this.extractTerms(content);
+                contentWords.forEach(w => conceptCandidates.add(w));
             }
         }
 
-        // Get top terms
-        const topTerms = Array.from(termFreq.entries())
+        // PHASE 2: FINE - Calculate global distinctiveness
+        const allRecords = await this.vectorIndex.getAllRecords();
+        const totalDocs = allRecords.length;
+
+        // Build global document frequency map (how many notes contain each term)
+        const globalDF: Map<string, number> = new Map();
+
+        // Sample 500 random notes to estimate global DF (for performance)
+        const sampleSize = Math.min(500, totalDocs);
+        const sampleIndices = new Set<number>();
+        while (sampleIndices.size < sampleSize) {
+            sampleIndices.add(Math.floor(Math.random() * totalDocs));
+        }
+
+        const sampledRecords = Array.from(sampleIndices).map(i => allRecords[i]);
+
+        for (const record of sampledRecords) {
+            const file = this.app.vault.getAbstractFileByPath(record.id);
+            if (!(file instanceof TFile)) continue;
+
+            const titleWords = new Set(this.extractTerms(file.basename));
+            const pathWords = new Set(
+                record.id.split('/').slice(0, -1).flatMap(p => this.extractTerms(p))
+            );
+
+            const allWords = new Set([...titleWords, ...pathWords]);
+
+            for (const word of allWords) {
+                if (conceptCandidates.has(word)) {
+                    globalDF.set(word, (globalDF.get(word) || 0) + 1);
+                }
+            }
+        }
+
+        // Calculate local term frequency in semantic neighborhood
+        const localTF: Map<string, number> = new Map();
+        for (const note of notes.slice(0, 20)) {
+            const file = this.app.vault.getAbstractFileByPath(note.path);
+            if (!(file instanceof TFile)) continue;
+
+            const titleWords = this.extractTerms(file.basename);
+            const pathWords = note.path.split('/').slice(0, -1).flatMap(p => this.extractTerms(p));
+
+            for (const word of [...titleWords, ...pathWords]) {
+                if (conceptCandidates.has(word)) {
+                    localTF.set(word, (localTF.get(word) || 0) + 1);
+                }
+            }
+        }
+
+        // Calculate TF-IDF scores (local TF * global IDF)
+        const tfidfScores: Map<string, number> = new Map();
+        for (const term of conceptCandidates) {
+            // FILTER OUT query words from concepts (avoid redundancy)
+            if (queryWords && queryWords.has(term.toLowerCase())) {
+                continue;
+            }
+
+            const tf = localTF.get(term) || 1;
+            const df = globalDF.get(term) || 1;
+            const idf = Math.log(sampleSize / df);
+
+            // NARROW DISCRIMINATION: Filter out terms with low IDF
+            // If term appears in >30% of sampled notes, it's too generic
+            if (df / sampleSize > 0.3) {
+                continue; // Skip this term
+            }
+
+            tfidfScores.set(term, tf * idf);
+        }
+
+        // Get top candidates by TF-IDF
+        const rankedCandidates = Array.from(tfidfScores.entries())
             .sort((a, b) => b[1] - a[1])
-            .slice(0, 15)
+            .slice(0, 25)
             .map(([term]) => term);
 
-        // Embed concepts
-        const conceptEmbeddings = await this.embeddingService.embedBatch(topTerms);
+        if (rankedCandidates.length === 0) {
+            return [];
+        }
 
-        // Calculate similarity to query
-        const concepts: ConceptNode[] = topTerms.map((term, i) => {
-            const similarity = EmbeddingService.cosineSimilarity(
-                this.currentMonad!.queryEmbedding,
+        // Embed and rank by semantic similarity
+        const conceptEmbeddings = await this.embeddingService.embedBatch(rankedCandidates);
+
+        const concepts: ConceptNode[] = rankedCandidates.map((term, i) => {
+            const semanticSim = EmbeddingService.cosineSimilarity(
+                queryEmbedding,
                 conceptEmbeddings[i]
             );
+
+            // Boost by TF-IDF distinctiveness (but cap total at 1.0)
+            const tfidf = tfidfScores.get(term) || 0;
+            const normalizedTFIDF = Math.min(0.15, tfidf * 0.02);
+
+            // Ensure final similarity is capped at 1.0 (100%)
+            const finalSimilarity = Math.min(1.0, semanticSim + normalizedTFIDF);
 
             return {
                 term,
                 embedding: conceptEmbeddings[i],
-                similarity
+                similarity: finalSimilarity
             };
         });
 
-        // Sort by similarity and return top 12
         concepts.sort((a, b) => b.similarity - a.similarity);
         return concepts.slice(0, 12);
     }
@@ -424,16 +622,59 @@ export class SemanticMonadView extends ItemView {
      */
     private extractTerms(content: string): string[] {
         const stopWords = new Set([
+            // Common words
             'the', 'be', 'to', 'of', 'and', 'a', 'in', 'that', 'have',
-            'it', 'for', 'not', 'on', 'with', 'as', 'you', 'do', 'at'
+            'it', 'for', 'not', 'on', 'with', 'as', 'you', 'do', 'at',
+            'this', 'but', 'his', 'from', 'they', 'we', 'say', 'her', 'she',
+            'or', 'an', 'will', 'my', 'one', 'all', 'would', 'there', 'their',
+            'what', 'so', 'up', 'out', 'if', 'about', 'who', 'get', 'which',
+            'go', 'me', 'when', 'make', 'can', 'like', 'time', 'no', 'just',
+            'him', 'know', 'take', 'people', 'into', 'year', 'your', 'good',
+            'some', 'could', 'them', 'see', 'other', 'than', 'then', 'now',
+            'look', 'only', 'come', 'its', 'over', 'think', 'also', 'back',
+            'after', 'use', 'two', 'how', 'our', 'work', 'first', 'well',
+            'way', 'even', 'new', 'want', 'because', 'any', 'these', 'give',
+            'day', 'most', 'us', 'is', 'was', 'are', 'been', 'has', 'had',
+            'were', 'said', 'did', 'having', 'may', 'should', 'does', 'being',
+            'such', 'through', 'where', 'much', 'those', 'very', 'here',
+            'yeah', 'really', 'something', 'things', 'thing', 'more', 'many',
+            // Additional generic words
+            'mean', 'means', 'kind', 'sort', 'type', 'types', 'maybe', 'perhaps',
+            'question', 'questions', 'answer', 'answers', 'seems', 'seem',
+            'might', 'must', 'shall', 'need', 'needs', 'needed',
+            'probably', 'actually', 'basically', 'literally', 'generally',
+            'usually', 'often', 'sometimes', 'always', 'never',
+            'every', 'each', 'either', 'neither', 'both', 'few', 'several',
+            'between', 'among', 'before', 'during', 'within', 'without',
+            'against', 'since', 'until', 'while', 'though', 'although',
+            'however', 'therefore', 'thus', 'hence', 'whether',
+            'going', 'doing', 'made', 'making', 'used', 'using',
+            'called', 'call', 'found', 'find', 'given', 'give',
+            'became', 'become', 'comes', 'goes', 'gone', 'went',
+            // Vague qualifiers
+            'enough', 'quite', 'rather', 'somewhat', 'fairly',
+            'pretty', 'almost', 'nearly', 'hardly', 'barely',
+            'simply', 'merely', 'certainly', 'surely', 'indeed',
+            // Common verbs
+            'think', 'thought', 'know', 'knew', 'tell', 'told',
+            'feel', 'felt', 'show', 'shown', 'try', 'tried',
+            'ask', 'asked', 'help', 'helped', 'turn', 'turned'
         ]);
 
         return content
             .toLowerCase()
             .replace(/[#*_`\[\]()]/g, ' ')
             .split(/\s+/)
-            .filter(w => w.length > 4 && !stopWords.has(w) && !/^\d+$/.test(w))
-            .map(w => w.replace(/[^a-z0-9]/g, ''));
+            .filter(w => {
+                // More aggressive filtering
+                if (w.length < 5) return false;  // Increased from 3 to 5
+                if (stopWords.has(w)) return false;
+                if (/^\d+$/.test(w)) return false;  // No pure numbers
+                if (w.match(/^(https?|ftp|file)/)) return false;  // No URLs
+                return true;
+            })
+            .map(w => w.replace(/[^a-z0-9]/g, ''))
+            .filter(w => w.length >= 5);  // Re-filter after cleanup
     }
 
     /**
@@ -651,7 +892,13 @@ export class SemanticMonadView extends ItemView {
 
     async updateIndexStatus() {
         const stats = await this.vectorIndex.getStats();
-        this.statusDiv.setText(`Index: ${stats.indexedNotes} notes`);
+        if (stats.indexedNotes === 0) {
+            this.statusDiv.setText(`📊 Index: ${stats.indexedNotes} notes (Click "Index Vault" to start)`);
+            this.statusDiv.style.color = 'var(--text-muted)';
+        } else {
+            this.statusDiv.setText(`📊 Index: ${stats.indexedNotes} notes`);
+            this.statusDiv.style.color = 'var(--text-normal)';
+        }
     }
 
     registerVaultListeners() {

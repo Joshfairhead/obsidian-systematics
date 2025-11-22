@@ -141,23 +141,82 @@ export class VectorIndex {
     }
 
     /**
-     * Find k nearest neighbors to query embedding
+     * Find k nearest neighbors to query embedding with hybrid scoring
      */
-    async findNearest(queryEmbedding: number[], k: number): Promise<ScoredNote[]> {
+    async findNearest(
+        queryEmbedding: number[],
+        k: number,
+        queryText?: string
+    ): Promise<ScoredNote[]> {
         const records = await this.getAllRecords();
 
         const scored = records.map(record => {
-            const score = EmbeddingService.cosineSimilarity(queryEmbedding, record.embedding);
+            // Base semantic similarity score
+            const semanticScore = EmbeddingService.cosineSimilarity(queryEmbedding, record.embedding);
+
+            // Boost score based on metadata if query text provided
+            let boost = 0;
+            if (queryText) {
+                const queryLower = queryText.toLowerCase();
+                const pathLower = record.id.toLowerCase();
+                const titleLower = record.metadata.title.toLowerCase();
+                const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
+
+                // Boost based on individual query words in path
+                for (const word of queryWords) {
+                    if (word.length > 3) {
+                        // Strong boost if word appears in folder name
+                        const pathParts = pathLower.split('/');
+                        for (const part of pathParts) {
+                            // Split folder name into words
+                            const folderWords = part.split(/[\s-_]+/);
+                            for (const folderWord of folderWords) {
+                                // Match whole word or abbreviation
+                                // e.g., "science" matches "sci", "computer" matches "comp"
+                                if (folderWord === word ||
+                                    folderWord.includes(word) ||
+                                    (folderWord.length >= 3 && word.startsWith(folderWord))) {
+                                    boost += 0.12;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // Medium boost if word in title
+                        if (titleLower.includes(word)) {
+                            boost += 0.08;
+                        }
+                    }
+                }
+
+                // Extra boost if multiple query words match the same folder
+                let folderMatchCount = 0;
+                const pathParts = pathLower.split('/');
+                for (const part of pathParts) {
+                    const matchCount = queryWords.filter(w =>
+                        w.length > 3 && part.includes(w)
+                    ).length;
+                    if (matchCount > folderMatchCount) {
+                        folderMatchCount = matchCount;
+                    }
+                }
+                if (folderMatchCount >= 2) {
+                    boost += 0.15; // Big boost for folders matching multiple query terms
+                }
+            }
+
+            // Combine semantic score with metadata boost
+            const finalScore = Math.min(1.0, semanticScore + boost);
 
             return {
                 path: record.id,
-                score,
+                score: finalScore,
                 embedding: record.embedding,
                 metadata: record.metadata
             };
         });
 
-        // Sort by similarity descending
+        // Sort by final score descending
         scored.sort((a, b) => b.score - a.score);
 
         return scored.slice(0, k);
