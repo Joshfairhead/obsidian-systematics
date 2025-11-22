@@ -160,26 +160,48 @@ export class VectorIndex {
                 const queryLower = queryText.toLowerCase();
                 const pathLower = record.id.toLowerCase();
                 const titleLower = record.metadata.title.toLowerCase();
+                const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
 
-                // Strong boost if query appears in folder path
-                if (pathLower.includes(queryLower)) {
-                    boost += 0.15;
-                }
-
-                // Medium boost if query words appear in title
-                const queryWords = queryLower.split(/\s+/);
+                // Boost based on individual query words in path
                 for (const word of queryWords) {
-                    if (word.length > 3 && titleLower.includes(word)) {
-                        boost += 0.08;
+                    if (word.length > 3) {
+                        // Strong boost if word appears in folder name
+                        const pathParts = pathLower.split('/');
+                        for (const part of pathParts) {
+                            // Split folder name into words
+                            const folderWords = part.split(/[\s-_]+/);
+                            for (const folderWord of folderWords) {
+                                // Match whole word or abbreviation
+                                // e.g., "science" matches "sci", "computer" matches "comp"
+                                if (folderWord === word ||
+                                    folderWord.includes(word) ||
+                                    (folderWord.length >= 3 && word.startsWith(folderWord))) {
+                                    boost += 0.12;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // Medium boost if word in title
+                        if (titleLower.includes(word)) {
+                            boost += 0.08;
+                        }
                     }
                 }
 
-                // Small boost if in a topically-named folder
-                const folderMatch = queryWords.some(word =>
-                    word.length > 3 && pathLower.split('/').some(part => part.includes(word))
-                );
-                if (folderMatch) {
-                    boost += 0.1;
+                // Extra boost if multiple query words match the same folder
+                let folderMatchCount = 0;
+                const pathParts = pathLower.split('/');
+                for (const part of pathParts) {
+                    const matchCount = queryWords.filter(w =>
+                        w.length > 3 && part.includes(w)
+                    ).length;
+                    if (matchCount > folderMatchCount) {
+                        folderMatchCount = matchCount;
+                    }
+                }
+                if (folderMatchCount >= 2) {
+                    boost += 0.15; // Big boost for folders matching multiple query terms
                 }
             }
 
