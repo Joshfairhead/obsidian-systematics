@@ -466,98 +466,133 @@ export class SemanticMonadView extends ItemView {
     }
 
     /**
-     * Extract semantic concepts from notes using multiple sources
+     * Extract semantic concepts using global distinctiveness
+     * Two-phase: broad inclusion, narrow discrimination
      */
     async extractSemanticConcepts(notes: ScoredNote[], queryEmbedding: number[]): Promise<ConceptNode[]> {
+        // PHASE 1: COARSE - Define semantic neighborhood broadly
         const conceptCandidates: Set<string> = new Set();
 
-        // 1. Extract from note titles (major source for stub notes)
-        for (const note of notes.slice(0, 30)) {
+        // Extract from top notes (expanded to 40 for broader scope)
+        for (const note of notes.slice(0, 40)) {
             const file = this.app.vault.getAbstractFileByPath(note.path);
             if (!(file instanceof TFile)) continue;
 
-            // Add cleaned title words
+            // Add title words
             const titleWords = this.extractTerms(file.basename);
             titleWords.forEach(w => conceptCandidates.add(w));
 
-            // Add folder names as concepts
+            // Add folder names
             const pathParts = note.path.split('/');
             for (const part of pathParts.slice(0, -1)) {
                 const folderWords = this.extractTerms(part);
                 folderWords.forEach(w => conceptCandidates.add(w));
             }
+
+            // Add content words from substantial notes
+            const content = await this.app.vault.cachedRead(file);
+            if (content.length > 200) {
+                const contentWords = this.extractTerms(content);
+                contentWords.forEach(w => conceptCandidates.add(w));
+            }
         }
 
-        // 2. Extract from note content (especially for notes with substantial text)
-        const termFreqInQueryNotes: Map<string, number> = new Map();
-        const termsPerNote: Map<string, Set<string>> = new Map();
+        // PHASE 2: FINE - Calculate global distinctiveness
+        const allRecords = await this.vectorIndex.getAllRecords();
+        const totalDocs = allRecords.length;
 
-        for (const note of notes.slice(0, 20)) {
-            const file = this.app.vault.getAbstractFileByPath(note.path);
+        // Build global document frequency map (how many notes contain each term)
+        const globalDF: Map<string, number> = new Map();
+
+        // Sample 500 random notes to estimate global DF (for performance)
+        const sampleSize = Math.min(500, totalDocs);
+        const sampleIndices = new Set<number>();
+        while (sampleIndices.size < sampleSize) {
+            sampleIndices.add(Math.floor(Math.random() * totalDocs));
+        }
+
+        const sampledRecords = Array.from(sampleIndices).map(i => allRecords[i]);
+
+        for (const record of sampledRecords) {
+            const file = this.app.vault.getAbstractFileByPath(record.id);
             if (!(file instanceof TFile)) continue;
 
-            const content = await this.app.vault.cachedRead(file);
+            const titleWords = new Set(this.extractTerms(file.basename));
+            const pathWords = new Set(
+                record.id.split('/').slice(0, -1).flatMap(p => this.extractTerms(p))
+            );
 
-            // Only extract from content if note has substantial text
-            if (content.length > 200) {
-                const words = this.extractTerms(content);
-                const uniqueWords = new Set(words);
-                termsPerNote.set(note.path, uniqueWords);
+            const allWords = new Set([...titleWords, ...pathWords]);
 
-                for (const word of words) {
-                    termFreqInQueryNotes.set(word, (termFreqInQueryNotes.get(word) || 0) + 1);
-                    conceptCandidates.add(word);
+            for (const word of allWords) {
+                if (conceptCandidates.has(word)) {
+                    globalDF.set(word, (globalDF.get(word) || 0) + 1);
                 }
             }
         }
 
-        // 3. Calculate TF-IDF for content-based terms
+        // Calculate local term frequency in semantic neighborhood
+        const localTF: Map<string, number> = new Map();
+        for (const note of notes.slice(0, 20)) {
+            const file = this.app.vault.getAbstractFileByPath(note.path);
+            if (!(file instanceof TFile)) continue;
+
+            const titleWords = this.extractTerms(file.basename);
+            const pathWords = note.path.split('/').slice(0, -1).flatMap(p => this.extractTerms(p));
+
+            for (const word of [...titleWords, ...pathWords]) {
+                if (conceptCandidates.has(word)) {
+                    localTF.set(word, (localTF.get(word) || 0) + 1);
+                }
+            }
+        }
+
+        // Calculate TF-IDF scores (local TF * global IDF)
         const tfidfScores: Map<string, number> = new Map();
-        for (const [term, tf] of termFreqInQueryNotes.entries()) {
-            let df = 0;
-            for (const termSet of termsPerNote.values()) {
-                if (termSet.has(term)) df++;
+        for (const term of conceptCandidates) {
+            const tf = localTF.get(term) || 1;
+            const df = globalDF.get(term) || 1;
+            const idf = Math.log(sampleSize / df);
+
+            // NARROW DISCRIMINATION: Filter out terms with low IDF
+            // If term appears in >30% of sampled notes, it's too generic
+            if (df / sampleSize > 0.3) {
+                continue; // Skip this term
             }
 
-            const idf = Math.log((notes.length + 1) / (df + 1));
             tfidfScores.set(term, tf * idf);
         }
 
-        // 4. Combine and deduplicate candidates
-        const allCandidates = Array.from(conceptCandidates)
-            .filter(term => term.length >= 5); // Minimum length
+        // Get top candidates by TF-IDF
+        const rankedCandidates = Array.from(tfidfScores.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 25)
+            .map(([term]) => term);
 
-        // Limit to reasonable number for embedding
-        const topCandidates = allCandidates.slice(0, 30);
-
-        if (topCandidates.length === 0) {
+        if (rankedCandidates.length === 0) {
             return [];
         }
 
-        // 5. Embed all candidates
-        const conceptEmbeddings = await this.embeddingService.embedBatch(topCandidates);
+        // Embed and rank by semantic similarity
+        const conceptEmbeddings = await this.embeddingService.embedBatch(rankedCandidates);
 
-        // 6. Rank by semantic similarity to query
-        const concepts: ConceptNode[] = topCandidates.map((term, i) => {
+        const concepts: ConceptNode[] = rankedCandidates.map((term, i) => {
             const semanticSim = EmbeddingService.cosineSimilarity(
                 queryEmbedding,
                 conceptEmbeddings[i]
             );
 
-            // Boost by TF-IDF if available
+            // Boost by TF-IDF distinctiveness
             const tfidf = tfidfScores.get(term) || 0;
-            const tfidfBoost = Math.min(0.1, tfidf * 0.01);
-
-            const finalSimilarity = semanticSim + tfidfBoost;
+            const normalizedTFIDF = Math.min(0.15, tfidf * 0.02);
 
             return {
                 term,
                 embedding: conceptEmbeddings[i],
-                similarity: finalSimilarity
+                similarity: semanticSim + normalizedTFIDF
             };
         });
 
-        // Sort by similarity and return top concepts
         concepts.sort((a, b) => b.similarity - a.similarity);
         return concepts.slice(0, 12);
     }
