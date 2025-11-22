@@ -412,8 +412,8 @@ export class SemanticMonadView extends ItemView {
                 embeddingSum: queryEmbedding.reduce((a, b) => a + b, 0)
             });
 
-            // Find nearest notes
-            const nearestNotes = await this.vectorIndex.findNearest(queryEmbedding, 50);
+            // Find nearest notes with hybrid scoring (semantic + metadata)
+            const nearestNotes = await this.vectorIndex.findNearest(queryEmbedding, 50, query);
             console.log('Nearest notes found:', {
                 count: nearestNotes.length,
                 topScores: nearestNotes.slice(0, 5).map(n => ({ path: n.path, score: n.score })),

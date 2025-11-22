@@ -141,23 +141,60 @@ export class VectorIndex {
     }
 
     /**
-     * Find k nearest neighbors to query embedding
+     * Find k nearest neighbors to query embedding with hybrid scoring
      */
-    async findNearest(queryEmbedding: number[], k: number): Promise<ScoredNote[]> {
+    async findNearest(
+        queryEmbedding: number[],
+        k: number,
+        queryText?: string
+    ): Promise<ScoredNote[]> {
         const records = await this.getAllRecords();
 
         const scored = records.map(record => {
-            const score = EmbeddingService.cosineSimilarity(queryEmbedding, record.embedding);
+            // Base semantic similarity score
+            const semanticScore = EmbeddingService.cosineSimilarity(queryEmbedding, record.embedding);
+
+            // Boost score based on metadata if query text provided
+            let boost = 0;
+            if (queryText) {
+                const queryLower = queryText.toLowerCase();
+                const pathLower = record.id.toLowerCase();
+                const titleLower = record.metadata.title.toLowerCase();
+
+                // Strong boost if query appears in folder path
+                if (pathLower.includes(queryLower)) {
+                    boost += 0.15;
+                }
+
+                // Medium boost if query words appear in title
+                const queryWords = queryLower.split(/\s+/);
+                for (const word of queryWords) {
+                    if (word.length > 3 && titleLower.includes(word)) {
+                        boost += 0.08;
+                    }
+                }
+
+                // Small boost if in a topically-named folder
+                const folderMatch = queryWords.some(word =>
+                    word.length > 3 && pathLower.split('/').some(part => part.includes(word))
+                );
+                if (folderMatch) {
+                    boost += 0.1;
+                }
+            }
+
+            // Combine semantic score with metadata boost
+            const finalScore = Math.min(1.0, semanticScore + boost);
 
             return {
                 path: record.id,
-                score,
+                score: finalScore,
                 embedding: record.embedding,
                 metadata: record.metadata
             };
         });
 
-        // Sort by similarity descending
+        // Sort by final score descending
         scored.sort((a, b) => b.score - a.score);
 
         return scored.slice(0, k);
