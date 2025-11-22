@@ -685,41 +685,40 @@ export class SemanticMonadView extends ItemView {
 
     /**
      * Project embeddings to 2D for visualization
+     * Using simple circular layout for readability (no clustering)
      */
     async projectToVisualization(
         queryEmbedding: number[],
         concepts: ConceptNode[],
         topNotes: ScoredNote[]
     ): Promise<Point2D[]> {
-        // Combine all embeddings
-        const allEmbeddings = [
-            queryEmbedding,
-            ...concepts.map(c => c.embedding)
-        ];
+        // Use simple circular layout - evenly space concepts around circle
+        // This ensures no overlap and maximum readability
 
-        const labels = [
-            'query',
-            ...concepts.map(c => c.term)
-        ];
+        const center: Point2D = { x: 0, y: 0, label: 'query' };
+        const others: Point2D[] = [];
 
-        // Project to 2D with query at center
-        const { center, others } = await this.projectionEngine.projectWithCenter(
-            queryEmbedding,
-            concepts.map(c => c.embedding),
-            concepts.map(c => c.term)
-        );
+        const count = concepts.length;
+        const radius = 0.8; // Distance from center
 
-        // Scale to fit within canvas
-        const scaled = ProjectionEngine.scaleToRadius(others, 0.8);
+        for (let i = 0; i < count; i++) {
+            const angle = (i / count) * 2 * Math.PI;
+            const point: Point2D = {
+                x: Math.cos(angle) * radius,
+                y: Math.sin(angle) * radius,
+                label: concepts[i].term
+            };
+            others.push(point);
+        }
 
         // Store positions for click detection
         this.conceptPositions.clear();
-        scaled.forEach((point, i) => {
+        others.forEach((point, i) => {
             concepts[i].position2D = point;
             this.conceptPositions.set(concepts[i].term, point);
         });
 
-        return [center, ...scaled];
+        return [center, ...others];
     }
 
     /**
