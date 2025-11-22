@@ -97,6 +97,14 @@ export class SemanticMonadView extends ItemView {
         });
         this.indexButton.addEventListener('click', () => this.indexVault());
 
+        // Debug button to inspect index
+        const debugButton = controlsSection.createEl('button', {
+            text: 'Debug Index',
+            cls: 'index-vault-button'
+        });
+        debugButton.style.backgroundColor = 'var(--background-modifier-border)';
+        debugButton.addEventListener('click', () => this.debugIndex());
+
         // Breadcrumb trail
         this.breadcrumbTrail = container.createDiv('breadcrumb-trail');
         this.updateBreadcrumb();
@@ -168,6 +176,62 @@ export class SemanticMonadView extends ItemView {
 
             this.draw();
         }
+    }
+
+    /**
+     * Debug: Inspect what's in the index
+     */
+    async debugIndex() {
+        const records = await this.vectorIndex.getAllRecords();
+
+        console.log('=== INDEX CONTENTS ===');
+        console.log(`Total indexed: ${records.length} notes`);
+
+        // Group by folder
+        const byFolder: Map<string, number> = new Map();
+        const samplePaths: string[] = [];
+
+        for (const record of records) {
+            // Extract folder path
+            const parts = record.id.split('/');
+            const folder = parts.length > 1 ? parts.slice(0, -1).join('/') : 'root';
+            byFolder.set(folder, (byFolder.get(folder) || 0) + 1);
+
+            // Collect sample paths
+            if (samplePaths.length < 20) {
+                samplePaths.push(record.id);
+            }
+        }
+
+        console.log('\n=== Notes by Folder ===');
+        const sortedFolders = Array.from(byFolder.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 30);
+
+        for (const [folder, count] of sortedFolders) {
+            console.log(`${folder}: ${count} notes`);
+        }
+
+        console.log('\n=== Sample Paths ===');
+        for (const path of samplePaths) {
+            console.log(path);
+        }
+
+        // Search for computer science related paths
+        const csRelated = records.filter(r =>
+            r.id.toLowerCase().includes('computer') ||
+            r.id.toLowerCase().includes('cs') ||
+            r.id.toLowerCase().includes('programming') ||
+            r.id.toLowerCase().includes('algorithm') ||
+            r.id.toLowerCase().includes('software')
+        );
+
+        console.log(`\n=== Computer Science Related Paths (${csRelated.length}) ===`);
+        for (const record of csRelated.slice(0, 20)) {
+            console.log(record.id);
+        }
+
+        new Notice(`Index contains ${records.length} notes. Check console for details.`);
     }
 
     /**
