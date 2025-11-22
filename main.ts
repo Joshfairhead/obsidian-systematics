@@ -30,7 +30,7 @@ export default class SystematicsPlugin extends Plugin {
             this.activateView();
         });
 
-        this.addRibbonIcon('search', 'Open Semantic Search', () => {
+        this.addRibbonIcon('compass', 'Open Latent Space Explorer', () => {
             this.activateSemanticMonad();
         });
 
@@ -44,8 +44,8 @@ export default class SystematicsPlugin extends Plugin {
         });
 
         this.addCommand({
-            id: 'open-semantic-search',
-            name: 'Open Semantic Search',
+            id: 'open-latent-space-explorer',
+            name: 'Open Latent Space Explorer',
             callback: () => {
                 this.activateSemanticMonad();
             }
@@ -88,12 +88,12 @@ export default class SystematicsPlugin extends Plugin {
             leaf = leaves[0];
         } else {
             // Our view could not be found in the workspace, create a new leaf
-            // in the right sidebar for it
-            leaf = workspace.getRightLeaf(false);
+            // in the main area (not sidebar)
+            leaf = workspace.getLeaf(true);
             await leaf?.setViewState({ type: VIEW_TYPE_SEMANTIC_MONAD, active: true });
         }
 
-        // Reveal the leaf in case it is in a collapsed sidebar
+        // Reveal the leaf
         if (leaf) {
             workspace.revealLeaf(leaf);
         }

@@ -8,6 +8,7 @@ import { EmbeddingService } from './embeddingService';
 import { VectorIndex } from './vectorIndex';
 import { ProjectionEngine } from './projectionEngine';
 import { SemanticMonad, Point2D, ConceptNode, ScoredNote } from './semanticTypes';
+import { VocabularyService } from './vocabularyService';
 
 export const VIEW_TYPE_SEMANTIC_MONAD = 'systematics-semantic-monad';
 
@@ -45,11 +46,11 @@ export class SemanticMonadView extends ItemView {
     }
 
     getDisplayText(): string {
-        return 'Semantic Monad';
+        return 'Latent Space Explorer';
     }
 
     getIcon(): string {
-        return 'brain-circuit';
+        return 'compass';
     }
 
     async onOpen() {
@@ -80,7 +81,7 @@ export class SemanticMonadView extends ItemView {
     createUI(container: Element) {
         // Header
         const header = container.createDiv('semantic-monad-header');
-        header.createEl('h2', { text: 'Semantic Monad Explorer' });
+        header.createEl('h2', { text: 'Latent Space Explorer' });
 
         // Status and controls
         const controlsSection = container.createDiv('controls-section');
@@ -473,147 +474,95 @@ export class SemanticMonadView extends ItemView {
     }
 
     /**
-     * Extract semantic concepts using global distinctiveness
-     * Two-phase: broad inclusion, narrow discrimination
+     * Extract semantic concepts using GENERATIVE discovery from embedding model
+     * Explores latent space independently of vault notes
      */
     async extractSemanticConcepts(
         notes: ScoredNote[],
         queryEmbedding: number[],
         queryWords?: Set<string>
     ): Promise<ConceptNode[]> {
-        // PHASE 1: COARSE - Define semantic neighborhood broadly
-        const conceptCandidates: Set<string> = new Set();
+        console.log('🔮 Exploring latent space...');
 
-        // Extract from top notes (expanded to 40 for broader scope)
-        for (const note of notes.slice(0, 40)) {
-            const file = this.app.vault.getAbstractFileByPath(note.path);
-            if (!(file instanceof TFile)) continue;
+        // STEP 1: Get candidate vocabulary (model-generated + vault-extracted)
+        const coreVocabulary = VocabularyService.getCoreVocabulary();
 
-            // Add title words
-            const titleWords = this.extractTerms(file.basename);
-            titleWords.forEach(w => conceptCandidates.add(w));
+        // Extract vault terms (optional - works even with empty vault)
+        const vaultTerms = new Set<string>();
+        if (notes.length > 0) {
+            for (const note of notes.slice(0, 20)) {
+                const file = this.app.vault.getAbstractFileByPath(note.path);
+                if (!(file instanceof TFile)) continue;
 
-            // Add folder names
-            const pathParts = note.path.split('/');
-            for (const part of pathParts.slice(0, -1)) {
-                const folderWords = this.extractTerms(part);
-                folderWords.forEach(w => conceptCandidates.add(w));
-            }
+                // Extract from title and path
+                const titleWords = this.extractTerms(file.basename);
+                const pathWords = note.path.split('/').slice(0, -1).flatMap(p => this.extractTerms(p));
 
-            // Add content words from substantial notes
-            const content = await this.app.vault.cachedRead(file);
-            if (content.length > 200) {
-                const contentWords = this.extractTerms(content);
-                contentWords.forEach(w => conceptCandidates.add(w));
+                titleWords.forEach(w => vaultTerms.add(w));
+                pathWords.forEach(w => vaultTerms.add(w));
             }
         }
 
-        // PHASE 2: FINE - Calculate global distinctiveness
-        const allRecords = await this.vectorIndex.getAllRecords();
-        const totalDocs = allRecords.length;
+        // Merge: core vocabulary + vault terms
+        const allCandidates = VocabularyService.mergeWithVaultTerms(Array.from(vaultTerms));
 
-        // Build global document frequency map (how many notes contain each term)
-        const globalDF: Map<string, number> = new Map();
+        // Filter out query words to avoid redundancy
+        const filteredCandidates = allCandidates.filter(term => {
+            if (!queryWords) return true;
+            return !queryWords.has(term.toLowerCase());
+        });
 
-        // Sample 500 random notes to estimate global DF (for performance)
-        const sampleSize = Math.min(500, totalDocs);
-        const sampleIndices = new Set<number>();
-        while (sampleIndices.size < sampleSize) {
-            sampleIndices.add(Math.floor(Math.random() * totalDocs));
-        }
+        console.log(`📚 Vocabulary: ${filteredCandidates.length} candidates (${coreVocabulary.length} core + ${vaultTerms.size} vault)`);
 
-        const sampledRecords = Array.from(sampleIndices).map(i => allRecords[i]);
+        // STEP 2: Embed all candidates and rank by similarity
+        console.log('🧬 Embedding candidates...');
+        const candidateEmbeddings = await this.embeddingService.embedBatch(filteredCandidates);
 
-        for (const record of sampledRecords) {
-            const file = this.app.vault.getAbstractFileByPath(record.id);
-            if (!(file instanceof TFile)) continue;
-
-            const titleWords = new Set(this.extractTerms(file.basename));
-            const pathWords = new Set(
-                record.id.split('/').slice(0, -1).flatMap(p => this.extractTerms(p))
-            );
-
-            const allWords = new Set([...titleWords, ...pathWords]);
-
-            for (const word of allWords) {
-                if (conceptCandidates.has(word)) {
-                    globalDF.set(word, (globalDF.get(word) || 0) + 1);
-                }
-            }
-        }
-
-        // Calculate local term frequency in semantic neighborhood
-        const localTF: Map<string, number> = new Map();
-        for (const note of notes.slice(0, 20)) {
-            const file = this.app.vault.getAbstractFileByPath(note.path);
-            if (!(file instanceof TFile)) continue;
-
-            const titleWords = this.extractTerms(file.basename);
-            const pathWords = note.path.split('/').slice(0, -1).flatMap(p => this.extractTerms(p));
-
-            for (const word of [...titleWords, ...pathWords]) {
-                if (conceptCandidates.has(word)) {
-                    localTF.set(word, (localTF.get(word) || 0) + 1);
-                }
-            }
-        }
-
-        // Calculate TF-IDF scores (local TF * global IDF)
-        const tfidfScores: Map<string, number> = new Map();
-        for (const term of conceptCandidates) {
-            // FILTER OUT query words from concepts (avoid redundancy)
-            if (queryWords && queryWords.has(term.toLowerCase())) {
-                continue;
-            }
-
-            const tf = localTF.get(term) || 1;
-            const df = globalDF.get(term) || 1;
-            const idf = Math.log(sampleSize / df);
-
-            // NARROW DISCRIMINATION: Filter out terms with low IDF
-            // If term appears in >30% of sampled notes, it's too generic
-            if (df / sampleSize > 0.3) {
-                continue; // Skip this term
-            }
-
-            tfidfScores.set(term, tf * idf);
-        }
-
-        // Get top candidates by TF-IDF
-        const rankedCandidates = Array.from(tfidfScores.entries())
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 25)
-            .map(([term]) => term);
-
-        if (rankedCandidates.length === 0) {
-            return [];
-        }
-
-        // Embed and rank by semantic similarity
-        const conceptEmbeddings = await this.embeddingService.embedBatch(rankedCandidates);
-
-        const concepts: ConceptNode[] = rankedCandidates.map((term, i) => {
-            const semanticSim = EmbeddingService.cosineSimilarity(
+        const rankedConcepts = filteredCandidates.map((term, i) => {
+            const similarity = EmbeddingService.cosineSimilarity(
                 queryEmbedding,
-                conceptEmbeddings[i]
+                candidateEmbeddings[i]
             );
-
-            // Boost by TF-IDF distinctiveness (but cap total at 1.0)
-            const tfidf = tfidfScores.get(term) || 0;
-            const normalizedTFIDF = Math.min(0.15, tfidf * 0.02);
-
-            // Ensure final similarity is capped at 1.0 (100%)
-            const finalSimilarity = Math.min(1.0, semanticSim + normalizedTFIDF);
 
             return {
                 term,
-                embedding: conceptEmbeddings[i],
-                similarity: finalSimilarity
+                embedding: candidateEmbeddings[i],
+                similarity
             };
         });
 
-        concepts.sort((a, b) => b.similarity - a.similarity);
-        return concepts.slice(0, 12);
+        // Sort by similarity and take top 25 for further analysis
+        rankedConcepts.sort((a, b) => b.similarity - a.similarity);
+        const topConcepts = rankedConcepts.slice(0, 25);
+
+        console.log('🎯 Top concepts:', topConcepts.slice(0, 5).map(c => `${c.term} (${(c.similarity * 100).toFixed(0)}%)`));
+
+        // STEP 3: Check which concepts have notes in vault
+        const allRecords = await this.vectorIndex.getAllRecords();
+        const conceptsWithNotes: ConceptNode[] = topConcepts.map(concept => {
+            // Check if any notes relate to this concept
+            const relatedNotes = allRecords.filter(record => {
+                const title = record.metadata.title.toLowerCase();
+                const path = record.id.toLowerCase();
+                const term = concept.term.toLowerCase();
+
+                return title.includes(term) || path.includes(term);
+            });
+
+            return {
+                ...concept,
+                hasNotes: relatedNotes.length > 0,
+                noteCount: relatedNotes.length
+            };
+        });
+
+        // Return top 12 concepts
+        const finalConcepts = conceptsWithNotes.slice(0, 12);
+
+        const withNotes = finalConcepts.filter(c => c.hasNotes).length;
+        console.log(`✨ Final: ${finalConcepts.length} concepts (${withNotes} with notes, ${finalConcepts.length - withNotes} pure latent)`);
+
+        return finalConcepts;
     }
 
     /**
@@ -787,8 +736,12 @@ export class SemanticMonadView extends ItemView {
                 radius * 0.85
             );
 
+            // Visual distinction: opacity based on whether concept has notes
+            const opacity = concept.hasNotes ? 1.0 : 0.4;
+
             // Draw concept dot (color by similarity)
             const intensity = Math.floor(concept.similarity * 200 + 55);
+            this.ctx.globalAlpha = opacity;
             this.ctx.fillStyle = `rgb(${intensity}, 100, ${255 - intensity})`;
             this.ctx.beginPath();
             this.ctx.arc(pos.x, pos.y, 4, 0, 2 * Math.PI);
@@ -797,6 +750,9 @@ export class SemanticMonadView extends ItemView {
             // Draw concept label
             this.ctx.fillStyle = textColor;
             this.ctx.fillText(concept.term, pos.x, pos.y - 10);
+
+            // Reset alpha
+            this.ctx.globalAlpha = 1.0;
         }
     }
 
@@ -927,10 +883,16 @@ export class SemanticMonadView extends ItemView {
         const conceptItems = this.conceptsList.createEl('div', { cls: 'concept-items' });
 
         for (const concept of this.currentMonad.concepts) {
+            // Show note indicator if concept has notes
+            const noteIndicator = concept.hasNotes ? ` 📝${concept.noteCount}` : '';
+            const opacity = concept.hasNotes ? '1.0' : '0.5';
+
             const tag = conceptItems.createEl('span', {
-                text: `${concept.term} (${(concept.similarity * 100).toFixed(0)}%)`,
+                text: `${concept.term} (${(concept.similarity * 100).toFixed(0)}%)${noteIndicator}`,
                 cls: 'concept-tag clickable'
             });
+
+            tag.style.opacity = opacity;
 
             tag.addEventListener('click', () => {
                 this.searchInput.value = concept.term;
