@@ -466,76 +466,98 @@ export class SemanticMonadView extends ItemView {
     }
 
     /**
-     * Extract semantic concepts from notes using TF-IDF weighting
+     * Extract semantic concepts from notes using multiple sources
      */
     async extractSemanticConcepts(notes: ScoredNote[], queryEmbedding: number[]): Promise<ConceptNode[]> {
-        // Count term frequency in query-related notes
+        const conceptCandidates: Set<string> = new Set();
+
+        // 1. Extract from note titles (major source for stub notes)
+        for (const note of notes.slice(0, 30)) {
+            const file = this.app.vault.getAbstractFileByPath(note.path);
+            if (!(file instanceof TFile)) continue;
+
+            // Add cleaned title words
+            const titleWords = this.extractTerms(file.basename);
+            titleWords.forEach(w => conceptCandidates.add(w));
+
+            // Add folder names as concepts
+            const pathParts = note.path.split('/');
+            for (const part of pathParts.slice(0, -1)) {
+                const folderWords = this.extractTerms(part);
+                folderWords.forEach(w => conceptCandidates.add(w));
+            }
+        }
+
+        // 2. Extract from note content (especially for notes with substantial text)
         const termFreqInQueryNotes: Map<string, number> = new Map();
         const termsPerNote: Map<string, Set<string>> = new Map();
 
-        for (const note of notes) {
+        for (const note of notes.slice(0, 20)) {
             const file = this.app.vault.getAbstractFileByPath(note.path);
             if (!(file instanceof TFile)) continue;
 
             const content = await this.app.vault.cachedRead(file);
-            const words = this.extractTerms(content);
-            const uniqueWords = new Set(words);
-            termsPerNote.set(note.path, uniqueWords);
 
-            for (const word of words) {
-                termFreqInQueryNotes.set(word, (termFreqInQueryNotes.get(word) || 0) + 1);
+            // Only extract from content if note has substantial text
+            if (content.length > 200) {
+                const words = this.extractTerms(content);
+                const uniqueWords = new Set(words);
+                termsPerNote.set(note.path, uniqueWords);
+
+                for (const word of words) {
+                    termFreqInQueryNotes.set(word, (termFreqInQueryNotes.get(word) || 0) + 1);
+                    conceptCandidates.add(word);
+                }
             }
         }
 
-        // Get document frequency (how many notes contain each term) from index stats
-        const allStats = await this.vectorIndex.getStats();
-        const totalDocs = allStats.indexedNotes;
-
-        // Calculate TF-IDF scores
+        // 3. Calculate TF-IDF for content-based terms
         const tfidfScores: Map<string, number> = new Map();
-
         for (const [term, tf] of termFreqInQueryNotes.entries()) {
-            // Count how many of the query-related notes contain this term
             let df = 0;
             for (const termSet of termsPerNote.values()) {
                 if (termSet.has(term)) df++;
             }
 
-            // TF-IDF: term frequency * inverse document frequency
-            // Use query-related notes as corpus for better relevance
             const idf = Math.log((notes.length + 1) / (df + 1));
-            const tfidf = tf * idf;
-
-            // Boost terms that appear in query embedding space
-            // (will be refined by semantic similarity later)
-            tfidfScores.set(term, tfidf);
+            tfidfScores.set(term, tf * idf);
         }
 
-        // Get top terms by TF-IDF score
-        const topTerms = Array.from(tfidfScores.entries())
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 20)  // Get more candidates
-            .map(([term]) => term)
-            .filter(term => term.length > 3);  // Ensure quality terms
+        // 4. Combine and deduplicate candidates
+        const allCandidates = Array.from(conceptCandidates)
+            .filter(term => term.length >= 5); // Minimum length
 
-        // Embed concepts
-        const conceptEmbeddings = await this.embeddingService.embedBatch(topTerms);
+        // Limit to reasonable number for embedding
+        const topCandidates = allCandidates.slice(0, 30);
 
-        // Calculate similarity to query
-        const concepts: ConceptNode[] = topTerms.map((term, i) => {
-            const similarity = EmbeddingService.cosineSimilarity(
+        if (topCandidates.length === 0) {
+            return [];
+        }
+
+        // 5. Embed all candidates
+        const conceptEmbeddings = await this.embeddingService.embedBatch(topCandidates);
+
+        // 6. Rank by semantic similarity to query
+        const concepts: ConceptNode[] = topCandidates.map((term, i) => {
+            const semanticSim = EmbeddingService.cosineSimilarity(
                 queryEmbedding,
                 conceptEmbeddings[i]
             );
 
+            // Boost by TF-IDF if available
+            const tfidf = tfidfScores.get(term) || 0;
+            const tfidfBoost = Math.min(0.1, tfidf * 0.01);
+
+            const finalSimilarity = semanticSim + tfidfBoost;
+
             return {
                 term,
                 embedding: conceptEmbeddings[i],
-                similarity
+                similarity: finalSimilarity
             };
         });
 
-        // Sort by similarity and return top 12
+        // Sort by similarity and return top concepts
         concepts.sort((a, b) => b.similarity - a.similarity);
         return concepts.slice(0, 12);
     }
