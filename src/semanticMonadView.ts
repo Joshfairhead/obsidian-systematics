@@ -340,7 +340,7 @@ export class SemanticMonadView extends ItemView {
             }
 
             // Extract concepts from top notes
-            const concepts = await this.extractSemanticConcepts(nearestNotes.slice(0, 20));
+            const concepts = await this.extractSemanticConcepts(nearestNotes.slice(0, 20), queryEmbedding);
 
             // Project to 2D
             const projection = await this.projectToVisualization(
@@ -382,7 +382,7 @@ export class SemanticMonadView extends ItemView {
     /**
      * Extract semantic concepts from notes
      */
-    async extractSemanticConcepts(notes: ScoredNote[]): Promise<ConceptNode[]> {
+    async extractSemanticConcepts(notes: ScoredNote[], queryEmbedding: number[]): Promise<ConceptNode[]> {
         // Aggregate all words from notes
         const termFreq: Map<string, number> = new Map();
 
@@ -410,7 +410,7 @@ export class SemanticMonadView extends ItemView {
         // Calculate similarity to query
         const concepts: ConceptNode[] = topTerms.map((term, i) => {
             const similarity = EmbeddingService.cosineSimilarity(
-                this.currentMonad!.queryEmbedding,
+                queryEmbedding,
                 conceptEmbeddings[i]
             );
 
