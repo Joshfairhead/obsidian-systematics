@@ -38,6 +38,12 @@ export class SemanticMonadView extends ItemView {
     animationFrame: number | null = null;
     animationTime: number = 0;
 
+    // Drag state
+    draggedConcept: string | null = null;
+    dragOffset: { x: number; y: number } = { x: 0, y: 0 };
+    isDragging: boolean = false;
+    mouseDownPos: { x: number; y: number } | null = null;
+
     constructor(leaf: WorkspaceLeaf, plugin: SystematicsPlugin) {
         super(leaf);
         this.plugin = plugin;
@@ -115,7 +121,7 @@ export class SemanticMonadView extends ItemView {
 
         titleRow.createEl('h2', { text: 'Latent Space Explorer' });
         const versionEl = titleRow.createEl('span', {
-            text: 'v0.4.0',
+            text: 'v0.4.1',
             cls: 'version-badge'
         });
         versionEl.style.fontSize = '11px';
@@ -183,10 +189,12 @@ export class SemanticMonadView extends ItemView {
         if (!ctx) throw new Error('Could not get canvas context');
         this.ctx = ctx;
 
-        // Add click and hover handlers for canvas
-        this.canvas.addEventListener('click', (e) => this.handleCanvasClick(e));
-        this.canvas.addEventListener('mousemove', (e) => this.handleCanvasHover(e));
+        // Add click, hover, and drag handlers for canvas
+        this.canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
+        this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+        this.canvas.addEventListener('mouseup', (e) => this.handleMouseUp(e));
         this.canvas.addEventListener('mouseleave', () => {
+            this.handleMouseUp(null);
             this.hoveredConcept = null;
             this.draw();
         });
@@ -744,15 +752,21 @@ export class SemanticMonadView extends ItemView {
         if (!this.currentMonad) return;
 
         const concepts = this.currentMonad.concepts;
-        const repulsionStrength = 0.05;
-        const centerAttractionStrength = 0.01;
-        const damping = 0.85;
+        const repulsionStrength = 0.015; // Reduced from 0.05 for gentler movement
+        const centerAttractionStrength = 0.008; // Slightly reduced
+        const damping = 0.94; // Increased from 0.85 for slower, smoother movement
         const minDistance = 0.2; // Minimum distance between concepts
+        const maxRadius = 0.85; // Maximum distance from center (boundary constraint)
 
         // Apply repulsion between all concepts
         for (let i = 0; i < concepts.length; i++) {
             const conceptA = concepts[i];
             if (!conceptA.position2D) continue;
+
+            // Skip physics for dragged concept
+            if (this.isDragging && conceptA.term === this.draggedConcept) {
+                continue;
+            }
 
             const velA = this.conceptVelocities.get(conceptA.term);
             if (!velA) continue;
@@ -770,7 +784,7 @@ export class SemanticMonadView extends ItemView {
                 const dist = Math.sqrt(dx * dx + dy * dy);
 
                 if (dist < minDistance) {
-                    // Strong repulsion when too close
+                    // Gentle repulsion when too close
                     const force = repulsionStrength / (dist + 0.01);
                     fx += (dx / dist) * force;
                     fy += (dy / dist) * force;
@@ -795,6 +809,20 @@ export class SemanticMonadView extends ItemView {
             // Update position
             conceptA.position2D.x += velA.vx;
             conceptA.position2D.y += velA.vy;
+
+            // Boundary constraint: clamp within circle
+            const newDist = Math.sqrt(
+                conceptA.position2D.x ** 2 + conceptA.position2D.y ** 2
+            );
+            if (newDist > maxRadius) {
+                // Clamp to boundary and stop velocity
+                const scale = maxRadius / newDist;
+                conceptA.position2D.x *= scale;
+                conceptA.position2D.y *= scale;
+                // Dampen velocity significantly when hitting boundary
+                velA.vx *= 0.3;
+                velA.vy *= 0.3;
+            }
 
             // Update stored position
             this.conceptPositions.set(conceptA.term, conceptA.position2D);
@@ -825,9 +853,52 @@ export class SemanticMonadView extends ItemView {
     }
 
     /**
-     * Handle mouse hover on canvas
+     * Handle mouse down - prepare for dragging or clicking
      */
-    handleCanvasHover(e: MouseEvent) {
+    handleMouseDown(e: MouseEvent) {
+        if (!this.currentMonad) return;
+
+        const rect = this.canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        // Store mouse down position to detect click vs drag
+        this.mouseDownPos = { x, y };
+
+        const centerX = this.canvas.width / 2;
+        const centerY = this.canvas.height / 2;
+        const radius = Math.min(this.canvas.width, this.canvas.height) / 3;
+
+        // Check if clicked near any concept
+        for (const concept of this.currentMonad.concepts) {
+            if (!concept.position2D) continue;
+
+            const pos = ProjectionEngine.toCanvasCoords(
+                concept.position2D,
+                centerX,
+                centerY,
+                radius * 0.9
+            );
+
+            const dist = Math.sqrt((x - pos.x) ** 2 + (y - pos.y) ** 2);
+
+            if (dist < 20) {
+                // Prepare for dragging this concept
+                this.draggedConcept = concept.term;
+                this.dragOffset = {
+                    x: pos.x - x,
+                    y: pos.y - y
+                };
+                this.canvas.style.cursor = 'grabbing';
+                return;
+            }
+        }
+    }
+
+    /**
+     * Handle mouse move - update drag position and hover state
+     */
+    handleMouseMove(e: MouseEvent) {
         if (!this.currentMonad) return;
 
         const rect = this.canvas.getBoundingClientRect();
@@ -838,9 +909,54 @@ export class SemanticMonadView extends ItemView {
         const centerY = this.canvas.height / 2;
         const radius = Math.min(this.canvas.width, this.canvas.height) / 3;
 
-        let foundHover = false;
+        // Check if we should start dragging (mouse moved with concept selected)
+        if (this.draggedConcept && !this.isDragging && this.mouseDownPos) {
+            const dx = x - this.mouseDownPos.x;
+            const dy = y - this.mouseDownPos.y;
+            const moveDist = Math.sqrt(dx * dx + dy * dy);
 
-        // Check if hovering near any concept
+            // Start dragging if moved more than 3 pixels
+            if (moveDist > 3) {
+                this.isDragging = true;
+                // Zero out velocity when starting drag
+                const vel = this.conceptVelocities.get(this.draggedConcept);
+                if (vel) {
+                    vel.vx = 0;
+                    vel.vy = 0;
+                }
+            }
+        }
+
+        // Handle dragging
+        if (this.isDragging && this.draggedConcept) {
+            const concept = this.currentMonad.concepts.find(c => c.term === this.draggedConcept);
+            if (concept && concept.position2D) {
+                // Convert mouse position to normalized coordinates
+                const canvasX = x + this.dragOffset.x;
+                const canvasY = y + this.dragOffset.y;
+
+                // Convert from canvas coords to normalized coords
+                const normX = (canvasX - centerX) / (radius * 0.9);
+                const normY = (canvasY - centerY) / (radius * 0.9);
+
+                // Clamp to circle boundary
+                const dist = Math.sqrt(normX * normX + normY * normY);
+                if (dist > 0.85) {
+                    const scale = 0.85 / dist;
+                    concept.position2D.x = normX * scale;
+                    concept.position2D.y = normY * scale;
+                } else {
+                    concept.position2D.x = normX;
+                    concept.position2D.y = normY;
+                }
+
+                this.conceptPositions.set(concept.term, concept.position2D);
+            }
+            return;
+        }
+
+        // Handle hover (when not dragging)
+        let foundHover = false;
         for (const concept of this.currentMonad.concepts) {
             if (!concept.position2D) continue;
 
@@ -848,15 +964,15 @@ export class SemanticMonadView extends ItemView {
                 concept.position2D,
                 centerX,
                 centerY,
-                radius * 0.85
+                radius * 0.9
             );
 
             const dist = Math.sqrt((x - pos.x) ** 2 + (y - pos.y) ** 2);
 
-            if (dist < 20) {  // Hover threshold
+            if (dist < 20) {
                 if (this.hoveredConcept !== concept.term) {
                     this.hoveredConcept = concept.term;
-                    this.canvas.style.cursor = 'pointer';
+                    this.canvas.style.cursor = 'grab';
                 }
                 foundHover = true;
                 break;
@@ -867,6 +983,24 @@ export class SemanticMonadView extends ItemView {
             this.hoveredConcept = null;
             this.canvas.style.cursor = 'default';
         }
+    }
+
+    /**
+     * Handle mouse up - stop dragging or handle click
+     */
+    handleMouseUp(e: MouseEvent | null) {
+        // If we have a dragged concept but never started dragging (no movement), treat as click
+        if (this.draggedConcept && !this.isDragging) {
+            // Navigate to this concept
+            this.searchInput.value = this.draggedConcept;
+            this.handleSemanticSearch();
+        }
+
+        // Clean up drag state
+        this.isDragging = false;
+        this.draggedConcept = null;
+        this.mouseDownPos = null;
+        this.canvas.style.cursor = this.hoveredConcept ? 'grab' : 'default';
     }
 
     /**
@@ -962,41 +1096,6 @@ export class SemanticMonadView extends ItemView {
         }
     }
 
-    /**
-     * Handle click on canvas (for concept navigation)
-     */
-    handleCanvasClick(e: MouseEvent) {
-        if (!this.currentMonad) return;
-
-        const rect = this.canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-
-        const centerX = this.canvas.width / 2;
-        const centerY = this.canvas.height / 2;
-        const radius = Math.min(this.canvas.width, this.canvas.height) / 3;
-
-        // Check if clicked near any concept
-        for (const concept of this.currentMonad.concepts) {
-            if (!concept.position2D) continue;
-
-            const pos = ProjectionEngine.toCanvasCoords(
-                concept.position2D,
-                centerX,
-                centerY,
-                radius * 0.85
-            );
-
-            const dist = Math.sqrt((x - pos.x) ** 2 + (y - pos.y) ** 2);
-
-            if (dist < 15) {  // Click threshold
-                // Navigate to this concept
-                this.searchInput.value = concept.term;
-                this.handleSemanticSearch();
-                break;
-            }
-        }
-    }
 
     displayNotes() {
         this.notesList.empty();
