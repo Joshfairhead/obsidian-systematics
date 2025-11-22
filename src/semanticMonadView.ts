@@ -398,6 +398,9 @@ export class SemanticMonadView extends ItemView {
         try {
             new Notice('Searching semantic space...');
 
+            // Normalize query (lowercase for matching)
+            const queryNormalized = query.toLowerCase();
+
             // Ensure server is connected
             if (!this.embeddingService.isReady()) {
                 await this.embeddingService.initialize();
@@ -413,7 +416,7 @@ export class SemanticMonadView extends ItemView {
             });
 
             // Find nearest notes with hybrid scoring (semantic + metadata)
-            const nearestNotes = await this.vectorIndex.findNearest(queryEmbedding, 50, query);
+            const nearestNotes = await this.vectorIndex.findNearest(queryEmbedding, 50, queryNormalized);
             console.log('Nearest notes found:', {
                 count: nearestNotes.length,
                 topScores: nearestNotes.slice(0, 5).map(n => ({ path: n.path, score: n.score })),
@@ -425,8 +428,13 @@ export class SemanticMonadView extends ItemView {
                 return;
             }
 
-            // Extract concepts from top notes
-            const concepts = await this.extractSemanticConcepts(nearestNotes.slice(0, 20), queryEmbedding);
+            // Extract concepts from top notes (pass query words to filter out)
+            const queryWords = new Set(queryNormalized.split(/\s+/).filter(w => w.length > 3));
+            const concepts = await this.extractSemanticConcepts(
+                nearestNotes.slice(0, 20),
+                queryEmbedding,
+                queryWords
+            );
 
             // Project to 2D
             const projection = await this.projectToVisualization(
@@ -469,7 +477,11 @@ export class SemanticMonadView extends ItemView {
      * Extract semantic concepts using global distinctiveness
      * Two-phase: broad inclusion, narrow discrimination
      */
-    async extractSemanticConcepts(notes: ScoredNote[], queryEmbedding: number[]): Promise<ConceptNode[]> {
+    async extractSemanticConcepts(
+        notes: ScoredNote[],
+        queryEmbedding: number[],
+        queryWords?: Set<string>
+    ): Promise<ConceptNode[]> {
         // PHASE 1: COARSE - Define semantic neighborhood broadly
         const conceptCandidates: Set<string> = new Set();
 
@@ -550,6 +562,11 @@ export class SemanticMonadView extends ItemView {
         // Calculate TF-IDF scores (local TF * global IDF)
         const tfidfScores: Map<string, number> = new Map();
         for (const term of conceptCandidates) {
+            // FILTER OUT query words from concepts (avoid redundancy)
+            if (queryWords && queryWords.has(term.toLowerCase())) {
+                continue;
+            }
+
             const tf = localTF.get(term) || 1;
             const df = globalDF.get(term) || 1;
             const idf = Math.log(sampleSize / df);
@@ -582,14 +599,17 @@ export class SemanticMonadView extends ItemView {
                 conceptEmbeddings[i]
             );
 
-            // Boost by TF-IDF distinctiveness
+            // Boost by TF-IDF distinctiveness (but cap total at 1.0)
             const tfidf = tfidfScores.get(term) || 0;
             const normalizedTFIDF = Math.min(0.15, tfidf * 0.02);
+
+            // Ensure final similarity is capped at 1.0 (100%)
+            const finalSimilarity = Math.min(1.0, semanticSim + normalizedTFIDF);
 
             return {
                 term,
                 embedding: conceptEmbeddings[i],
-                similarity: semanticSim + normalizedTFIDF
+                similarity: finalSimilarity
             };
         });
 
