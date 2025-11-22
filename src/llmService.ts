@@ -54,17 +54,21 @@ Now generate ${count} terms for "${query}":`;
             const data = await response.json();
             const text = data.response.trim();
 
-            // Parse comma-separated terms, more lenient parsing
+            console.log(`🦙 Ollama raw response for "${query}":`, text.substring(0, 200));
+
+            // Parse comma-separated terms, very lenient parsing
             const terms = text
                 .split(/[,\n]/)  // Split by comma OR newline
                 .map((term: string) => term.trim().toLowerCase())
                 .map((term: string) => term.replace(/^[-\d.)\s]+/, ''))  // Remove leading numbers/bullets
+                .map((term: string) => term.replace(/[^a-z-\s]/g, ''))  // Remove special chars except hyphens
+                .map((term: string) => term.trim())
                 .filter((term: string) => term.length > 2 && term.length < 30)
-                .filter((term: string) => !term.match(/^(example|here|are|the|terms|for)/))
-                .filter((term: string) => term.match(/^[a-z-]+$/))  // Only letters and hyphens
+                .filter((term: string) => !term.match(/^(example|here|are|the|terms|for|now|generate|related)/))
+                .filter((term: string) => term.match(/^[a-z][a-z-]*$/))  // Must start with letter, allow hyphens
                 .slice(0, count);
 
-            console.log(`🦙 Ollama generated ${terms.length} concepts for "${query}":`, terms.slice(0, 5));
+            console.log(`🦙 Ollama parsed ${terms.length} concepts for "${query}":`, terms.slice(0, 10));
             return terms;
 
         } catch (error) {

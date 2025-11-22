@@ -104,7 +104,19 @@ export class SemanticMonadView extends ItemView {
     createUI(container: Element) {
         // Header
         const header = container.createDiv('semantic-monad-header');
-        header.createEl('h2', { text: 'Latent Space Explorer' });
+        const titleRow = header.createDiv('title-row');
+        titleRow.style.display = 'flex';
+        titleRow.style.alignItems = 'baseline';
+        titleRow.style.gap = '10px';
+
+        titleRow.createEl('h2', { text: 'Latent Space Explorer' });
+        const versionEl = titleRow.createEl('span', {
+            text: 'v0.2.0',
+            cls: 'version-badge'
+        });
+        versionEl.style.fontSize = '11px';
+        versionEl.style.color = 'var(--text-muted)';
+        versionEl.style.fontWeight = 'normal';
 
         // Status and controls
         const controlsSection = container.createDiv('controls-section');
