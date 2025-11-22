@@ -86,6 +86,9 @@ export class SemanticMonadView extends ItemView {
         const controlsSection = container.createDiv('controls-section');
 
         this.statusDiv = controlsSection.createDiv('index-status');
+        this.statusDiv.style.fontSize = '14px';
+        this.statusDiv.style.padding = '8px';
+        this.statusDiv.style.marginBottom = '8px';
         this.updateIndexStatus();
 
         this.indexButton = controlsSection.createEl('button', {
@@ -195,9 +198,10 @@ export class SemanticMonadView extends ItemView {
                 this.statusDiv.setText(`Connected to ${modelInfo.name}! Starting to index...`);
                 new Notice(`Embedding server ready! Using ${modelInfo.name}`, 3000);
             } catch (error) {
-                const msg = `Failed to connect to embedding server: ${error.message}`;
+                const msg = `❌ Failed to connect to embedding server: ${error.message}`;
                 this.statusDiv.setText(msg);
-                new Notice('Cannot connect to embedding server. Please ensure the Rust server is running on localhost:8765', 15000);
+                this.statusDiv.style.color = 'var(--text-error)';
+                new Notice('❌ Cannot connect to embedding server. Please ensure the Rust server is running on localhost:8765', 15000);
                 console.error('Embedding service initialization failed:', error);
                 throw new Error('Embedding server unavailable: ' + error.message);
             }
@@ -244,21 +248,24 @@ export class SemanticMonadView extends ItemView {
             }
 
             if (indexed > 0) {
-                const msg = `Indexed ${indexed} notes!` + (failed > 0 ? ` (${failed} failed)` : '');
+                const msg = `✅ Indexed ${indexed} notes!` + (failed > 0 ? ` (${failed} failed)` : '');
                 new Notice(msg);
-                this.statusDiv.setText(`Index: ${indexed} notes` + (failed > 0 ? ` (${failed} errors)` : ''));
+                this.statusDiv.setText(`✅ Index: ${indexed} notes` + (failed > 0 ? ` (${failed} errors)` : ''));
+                this.statusDiv.style.color = 'var(--text-success)';
             } else {
-                const msg = 'No notes were indexed - all failed. See errors above.';
+                const msg = '❌ No notes were indexed - all failed. See errors above.';
                 new Notice(msg, 10000);
                 this.statusDiv.setText(msg);
+                this.statusDiv.style.color = 'var(--text-error)';
             }
 
             await this.updateIndexStatus();
 
         } catch (error) {
-            const msg = 'Indexing failed: ' + error.message;
+            const msg = '❌ Indexing failed: ' + error.message;
             new Notice(msg, 10000);
             this.statusDiv.setText(msg);
+            this.statusDiv.style.color = 'var(--text-error)';
             console.error('Indexing error:', error);
         } finally {
             this.isIndexing = false;
@@ -651,7 +658,13 @@ export class SemanticMonadView extends ItemView {
 
     async updateIndexStatus() {
         const stats = await this.vectorIndex.getStats();
-        this.statusDiv.setText(`Index: ${stats.indexedNotes} notes`);
+        if (stats.indexedNotes === 0) {
+            this.statusDiv.setText(`📊 Index: ${stats.indexedNotes} notes (Click "Index Vault" to start)`);
+            this.statusDiv.style.color = 'var(--text-muted)';
+        } else {
+            this.statusDiv.setText(`📊 Index: ${stats.indexedNotes} notes`);
+            this.statusDiv.style.color = 'var(--text-normal)';
+        }
     }
 
     registerVaultListeners() {
