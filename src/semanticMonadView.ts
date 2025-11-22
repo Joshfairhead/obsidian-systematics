@@ -189,13 +189,17 @@ export class SemanticMonadView extends ItemView {
     resizeCanvas() {
         const parent = this.canvas.parentElement;
         if (parent) {
+            // Match width to parent (left column)
             const parentWidth = parent.clientWidth || 400;
-            const size = Math.min(Math.max(parentWidth - 40, 300), 600);
+            // Make it square, bounded by reasonable limits
+            const size = Math.min(Math.max(parentWidth - 20, 300), 500);
 
             this.canvas.width = size;
             this.canvas.height = size;
-            this.canvas.style.width = size + 'px';
-            this.canvas.style.height = size + 'px';
+            this.canvas.style.width = '100%';  // Responsive width
+            this.canvas.style.height = 'auto'; // Maintain aspect ratio
+            this.canvas.style.maxWidth = '500px';
+            this.canvas.style.maxHeight = '500px';
 
             this.draw();
         }
@@ -920,9 +924,75 @@ export class SemanticMonadView extends ItemView {
             tag.style.opacity = opacity;
 
             tag.addEventListener('click', () => {
-                this.searchInput.value = concept.term;
-                this.handleSemanticSearch();
+                // If concept has notes, show those specific notes
+                if (concept.hasNotes) {
+                    this.showNotesForConcept(concept.term);
+                } else {
+                    // Otherwise, search for the concept in latent space
+                    this.searchInput.value = concept.term;
+                    this.handleSemanticSearch();
+                }
             });
+        }
+    }
+
+    /**
+     * Show only notes that match a specific concept
+     */
+    async showNotesForConcept(conceptTerm: string) {
+        if (!this.currentMonad) return;
+
+        const allRecords = await this.vectorIndex.getAllRecords();
+
+        // Find notes that contain this concept in title or path
+        const matchingNotes = allRecords.filter(record => {
+            const title = record.metadata.title.toLowerCase();
+            const path = record.id.toLowerCase();
+            const term = conceptTerm.toLowerCase();
+
+            return title.includes(term) || path.includes(term);
+        });
+
+        if (matchingNotes.length === 0) {
+            new Notice(`No notes found for concept: ${conceptTerm}`);
+            return;
+        }
+
+        // Clear and show only matching notes
+        this.notesList.empty();
+
+        const section = this.notesList.createDiv('concept-notes-section');
+        section.createEl('h3', { text: `Notes for: ${conceptTerm}` });
+        section.createEl('p', {
+            text: `${matchingNotes.length} note(s) found`,
+            cls: 'section-subtitle'
+        });
+
+        const noteItems = section.createEl('ul', { cls: 'note-items' });
+
+        for (const record of matchingNotes) {
+            const file = this.app.vault.getAbstractFileByPath(record.id);
+            if (!(file instanceof TFile)) continue;
+
+            const item = noteItems.createEl('li', { cls: 'note-item' });
+
+            const link = item.createEl('a', {
+                text: file.basename,
+                cls: 'note-link'
+            });
+
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.app.workspace.openLinkText(file.path, '', false);
+            });
+
+            // Show path for context
+            const pathSpan = item.createEl('span', {
+                text: ` - ${record.id}`,
+                cls: 'note-path'
+            });
+            pathSpan.style.fontSize = '11px';
+            pathSpan.style.color = 'var(--text-muted)';
         }
     }
 

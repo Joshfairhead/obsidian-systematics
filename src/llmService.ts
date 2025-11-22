@@ -20,13 +20,17 @@ export class OllamaProvider implements LLMProvider {
     }
 
     async generateConcepts(query: string, count: number = 25): Promise<string[]> {
-        const prompt = `Generate exactly ${count} single-word or hyphenated terms that are semantically related to: "${query}"
+        const prompt = `You are a semantic concept generator. Generate ${count} related terms for: "${query}"
 
-Return ONLY a comma-separated list of terms, no explanations or additional text.
+Rules:
+- Return ONLY single words or hyphenated-terms
+- No explanations, numbers, or extra text
+- Format as comma-separated list
+- Related to the topic semantically
 
-Example format: algorithm, programming, database, software, network
+Example for "computer-science": algorithm, programming, software, database, network, compiler, data-structure, artificial-intelligence, machine-learning, operating-system
 
-Terms related to "${query}":`;
+Now generate ${count} terms for "${query}":`;
 
         try {
             const response = await fetch(`${this.endpoint}/api/generate`, {
@@ -37,8 +41,8 @@ Terms related to "${query}":`;
                     prompt: prompt,
                     stream: false,
                     options: {
-                        temperature: 0.7,
-                        num_predict: 200
+                        temperature: 0.8,
+                        num_predict: 300
                     }
                 })
             });
@@ -48,17 +52,19 @@ Terms related to "${query}":`;
             }
 
             const data = await response.json();
-            const text = data.response;
+            const text = data.response.trim();
 
-            // Parse comma-separated terms
+            // Parse comma-separated terms, more lenient parsing
             const terms = text
-                .split(',')
+                .split(/[,\n]/)  // Split by comma OR newline
                 .map((term: string) => term.trim().toLowerCase())
+                .map((term: string) => term.replace(/^[-\d.)\s]+/, ''))  // Remove leading numbers/bullets
                 .filter((term: string) => term.length > 2 && term.length < 30)
-                .filter((term: string) => !term.includes('\n'))
+                .filter((term: string) => !term.match(/^(example|here|are|the|terms|for)/))
+                .filter((term: string) => term.match(/^[a-z-]+$/))  // Only letters and hyphens
                 .slice(0, count);
 
-            console.log(`🦙 Ollama generated ${terms.length} concepts for "${query}"`);
+            console.log(`🦙 Ollama generated ${terms.length} concepts for "${query}":`, terms.slice(0, 5));
             return terms;
 
         } catch (error) {
