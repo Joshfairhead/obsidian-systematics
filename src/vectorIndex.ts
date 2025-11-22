@@ -162,6 +162,16 @@ export class VectorIndex {
                 const titleLower = record.metadata.title.toLowerCase();
                 const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
 
+                // DIRECT TITLE MATCH: If query exactly matches title, give perfect score
+                if (titleLower === queryLower) {
+                    return {
+                        path: record.id,
+                        score: 1.0,
+                        embedding: record.embedding,
+                        metadata: record.metadata
+                    };
+                }
+
                 // Boost based on individual query words in path
                 for (const word of queryWords) {
                     if (word.length > 3) {

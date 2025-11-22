@@ -155,8 +155,7 @@ export class SemanticMonadView extends ItemView {
         const rightColumn = contentLayout.createDiv('right-column');
 
         const notesPanel = rightColumn.createDiv('notes-panel');
-        notesPanel.createEl('h3', { text: 'Semantically Related Notes' });
-        this.notesList = notesPanel.createDiv('notes-list');
+        this.notesList = notesPanel; // Store the entire panel, we'll populate it dynamically
 
         // Initialize canvas
         this.resizeCanvas();
@@ -373,7 +372,7 @@ export class SemanticMonadView extends ItemView {
             path: file.path,
             mtime: file.stat.mtime,
             tags: [], // Could extract from frontmatter
-            links: []  // Could extract from content
+            links: this.extractWikiLinks(content)
         };
 
         // Store in index
@@ -618,6 +617,23 @@ export class SemanticMonadView extends ItemView {
     }
 
     /**
+     * Extract wiki links from markdown content
+     */
+    private extractWikiLinks(content: string): string[] {
+        const linkPattern = /\[\[([^\]]+)\]\]/g;
+        const links: string[] = [];
+        let match;
+
+        while ((match = linkPattern.exec(content)) !== null) {
+            // Extract link text (may include alias like [[Link|Alias]])
+            const linkText = match[1].split('|')[0].trim();
+            links.push(linkText);
+        }
+
+        return [...new Set(links)]; // Remove duplicates
+    }
+
+    /**
      * Extract meaningful terms from text
      */
     private extractTerms(content: string): string[] {
@@ -828,7 +844,54 @@ export class SemanticMonadView extends ItemView {
             return;
         }
 
-        const noteItems = this.notesList.createEl('ul', { cls: 'note-items' });
+        // Find the top match (likely the direct match if query matched a title)
+        const topMatch = this.currentMonad.notes[0];
+        const topFile = this.app.vault.getAbstractFileByPath(topMatch.path);
+
+        // If top match has links, show them separately
+        if (topFile instanceof TFile && topMatch.metadata.links.length > 0) {
+            const linkedSection = this.notesList.createDiv('linked-notes-section');
+            linkedSection.createEl('h3', { text: 'Linked Notes' });
+            linkedSection.createEl('p', {
+                text: `From: ${topFile.basename}`,
+                cls: 'section-subtitle'
+            });
+
+            const linkedItems = linkedSection.createEl('ul', { cls: 'note-items' });
+
+            for (const linkTitle of topMatch.metadata.links) {
+                // Try to find the linked note in our results
+                const linkedNote = this.currentMonad.notes.find(n =>
+                    n.metadata.title.toLowerCase() === linkTitle.toLowerCase()
+                );
+
+                const item = linkedItems.createEl('li', { cls: 'note-item linked-note' });
+
+                const link = item.createEl('a', {
+                    text: linkTitle,
+                    cls: 'note-link'
+                });
+
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    // Try to open the linked note
+                    this.app.workspace.openLinkText(linkTitle, topMatch.path, false);
+                });
+
+                if (linkedNote) {
+                    const score = item.createEl('span', {
+                        text: `${(linkedNote.score * 100).toFixed(0)}%`,
+                        cls: 'relevance-score'
+                    });
+                }
+            }
+        }
+
+        // Show all notes by semantic similarity
+        const semanticSection = this.notesList.createDiv('semantic-notes-section');
+        semanticSection.createEl('h3', { text: 'Semantically Related Notes' });
+
+        const noteItems = semanticSection.createEl('ul', { cls: 'note-items' });
 
         for (const note of this.currentMonad.notes) {
             const file = this.app.vault.getAbstractFileByPath(note.path);
