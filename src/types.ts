@@ -46,6 +46,13 @@ export interface NodeLabelSettings {
 export interface SystematicsSettings {
     currentGraph: number; // Which Kn graph is currently selected (3-12)
     nodeLabelSettings: { [graphKey: string]: NodeLabelSettings };
+
+    // Latent Space Explorer Settings
+    llmProvider: 'ollama' | 'claude' | 'openai';
+    ollamaModel: string;
+    ollamaEndpoint: string;
+    claudeApiKey: string;
+    openaiApiKey: string;
 }
 
 /**

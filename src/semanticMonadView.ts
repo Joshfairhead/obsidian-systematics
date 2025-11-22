@@ -8,7 +8,7 @@ import { EmbeddingService } from './embeddingService';
 import { VectorIndex } from './vectorIndex';
 import { ProjectionEngine } from './projectionEngine';
 import { SemanticMonad, Point2D, ConceptNode, ScoredNote } from './semanticTypes';
-import { VocabularyService } from './vocabularyService';
+import { LLMService } from './llmService';
 
 export const VIEW_TYPE_SEMANTIC_MONAD = 'systematics-semantic-monad';
 
@@ -17,6 +17,7 @@ export class SemanticMonadView extends ItemView {
     embeddingService: EmbeddingService;
     vectorIndex: VectorIndex;
     projectionEngine: ProjectionEngine;
+    llmService: LLMService | null = null;
 
     // UI Elements
     canvas: HTMLCanvasElement;
@@ -72,9 +73,31 @@ export class SemanticMonadView extends ItemView {
         try {
             await this.vectorIndex.initialize();
             // Embedding service initializes lazily on first use
+
+            // Initialize LLM service based on settings
+            this.initializeLLMService();
         } catch (error) {
             new Notice('Failed to initialize semantic search: ' + error.message);
             console.error(error);
+        }
+    }
+
+    /**
+     * Initialize LLM service from plugin settings
+     */
+    initializeLLMService() {
+        try {
+            const settings = this.plugin.settings;
+            this.llmService = new LLMService(settings.llmProvider, {
+                ollamaEndpoint: settings.ollamaEndpoint,
+                ollamaModel: settings.ollamaModel,
+                claudeApiKey: settings.claudeApiKey,
+                openaiApiKey: settings.openaiApiKey
+            });
+            console.log(`✨ LLM Service initialized with provider: ${settings.llmProvider}`);
+        } catch (error) {
+            console.error('Failed to initialize LLM service:', error);
+            new Notice(`LLM initialization failed: ${error.message}. Check settings.`);
         }
     }
 
@@ -474,95 +497,97 @@ export class SemanticMonadView extends ItemView {
     }
 
     /**
-     * Extract semantic concepts using GENERATIVE discovery from embedding model
-     * Explores latent space independently of vault notes
+     * Extract semantic concepts using LLM-GENERATED discovery
+     * Explores LLM's latent space, then maps to notes
      */
     async extractSemanticConcepts(
         notes: ScoredNote[],
         queryEmbedding: number[],
         queryWords?: Set<string>
     ): Promise<ConceptNode[]> {
-        console.log('🔮 Exploring latent space...');
+        console.log('🔮 Exploring latent space with LLM...');
 
-        // STEP 1: Get candidate vocabulary (model-generated + vault-extracted)
-        const coreVocabulary = VocabularyService.getCoreVocabulary();
-
-        // Extract vault terms (optional - works even with empty vault)
-        const vaultTerms = new Set<string>();
-        if (notes.length > 0) {
-            for (const note of notes.slice(0, 20)) {
-                const file = this.app.vault.getAbstractFileByPath(note.path);
-                if (!(file instanceof TFile)) continue;
-
-                // Extract from title and path
-                const titleWords = this.extractTerms(file.basename);
-                const pathWords = note.path.split('/').slice(0, -1).flatMap(p => this.extractTerms(p));
-
-                titleWords.forEach(w => vaultTerms.add(w));
-                pathWords.forEach(w => vaultTerms.add(w));
-            }
+        if (!this.llmService) {
+            console.error('LLM service not initialized');
+            new Notice('LLM service not configured. Check plugin settings.');
+            return [];
         }
 
-        // Merge: core vocabulary + vault terms
-        const allCandidates = VocabularyService.mergeWithVaultTerms(Array.from(vaultTerms));
+        try {
+            // STEP 1: Ask LLM to generate related concepts
+            const query = Array.from(queryWords || []).join(' ');
+            console.log(`🤖 Asking LLM for concepts related to: "${query}"`);
 
-        // Filter out query words to avoid redundancy
-        const filteredCandidates = allCandidates.filter(term => {
-            if (!queryWords) return true;
-            return !queryWords.has(term.toLowerCase());
-        });
+            const llmConcepts = await this.llmService.generateConcepts(query, 30);
+            console.log(`📝 LLM returned ${llmConcepts.length} concepts:`, llmConcepts.slice(0, 10));
 
-        console.log(`📚 Vocabulary: ${filteredCandidates.length} candidates (${coreVocabulary.length} core + ${vaultTerms.size} vault)`);
-
-        // STEP 2: Embed all candidates and rank by similarity
-        console.log('🧬 Embedding candidates...');
-        const candidateEmbeddings = await this.embeddingService.embedBatch(filteredCandidates);
-
-        const rankedConcepts = filteredCandidates.map((term, i) => {
-            const similarity = EmbeddingService.cosineSimilarity(
-                queryEmbedding,
-                candidateEmbeddings[i]
-            );
-
-            return {
-                term,
-                embedding: candidateEmbeddings[i],
-                similarity
-            };
-        });
-
-        // Sort by similarity and take top 25 for further analysis
-        rankedConcepts.sort((a, b) => b.similarity - a.similarity);
-        const topConcepts = rankedConcepts.slice(0, 25);
-
-        console.log('🎯 Top concepts:', topConcepts.slice(0, 5).map(c => `${c.term} (${(c.similarity * 100).toFixed(0)}%)`));
-
-        // STEP 3: Check which concepts have notes in vault
-        const allRecords = await this.vectorIndex.getAllRecords();
-        const conceptsWithNotes: ConceptNode[] = topConcepts.map(concept => {
-            // Check if any notes relate to this concept
-            const relatedNotes = allRecords.filter(record => {
-                const title = record.metadata.title.toLowerCase();
-                const path = record.id.toLowerCase();
-                const term = concept.term.toLowerCase();
-
-                return title.includes(term) || path.includes(term);
+            // Filter out query words to avoid redundancy
+            const filteredConcepts = llmConcepts.filter(term => {
+                if (!queryWords) return true;
+                return !queryWords.has(term.toLowerCase());
             });
 
-            return {
-                ...concept,
-                hasNotes: relatedNotes.length > 0,
-                noteCount: relatedNotes.length
-            };
-        });
+            if (filteredConcepts.length === 0) {
+                console.warn('No concepts after filtering');
+                return [];
+            }
 
-        // Return top 12 concepts
-        const finalConcepts = conceptsWithNotes.slice(0, 12);
+            // STEP 2: Embed LLM-generated concepts
+            console.log('🧬 Embedding LLM concepts...');
+            const conceptEmbeddings = await this.embeddingService.embedBatch(filteredConcepts);
 
-        const withNotes = finalConcepts.filter(c => c.hasNotes).length;
-        console.log(`✨ Final: ${finalConcepts.length} concepts (${withNotes} with notes, ${finalConcepts.length - withNotes} pure latent)`);
+            // STEP 3: Rank by semantic similarity to query
+            const rankedConcepts = filteredConcepts.map((term, i) => {
+                const similarity = EmbeddingService.cosineSimilarity(
+                    queryEmbedding,
+                    conceptEmbeddings[i]
+                );
 
-        return finalConcepts;
+                return {
+                    term,
+                    embedding: conceptEmbeddings[i],
+                    similarity
+                };
+            });
+
+            // Sort by similarity and take top 25
+            rankedConcepts.sort((a, b) => b.similarity - a.similarity);
+            const topConcepts = rankedConcepts.slice(0, 25);
+
+            console.log('🎯 Top ranked concepts:', topConcepts.slice(0, 5).map(c => `${c.term} (${(c.similarity * 100).toFixed(0)}%)`));
+
+            // STEP 4: Check which concepts have notes in vault
+            const allRecords = await this.vectorIndex.getAllRecords();
+            const conceptsWithNotes: ConceptNode[] = topConcepts.map(concept => {
+                // Check if any notes relate to this concept
+                const relatedNotes = allRecords.filter(record => {
+                    const title = record.metadata.title.toLowerCase();
+                    const path = record.id.toLowerCase();
+                    const term = concept.term.toLowerCase();
+
+                    return title.includes(term) || path.includes(term);
+                });
+
+                return {
+                    ...concept,
+                    hasNotes: relatedNotes.length > 0,
+                    noteCount: relatedNotes.length
+                };
+            });
+
+            // Return top 12 concepts
+            const finalConcepts = conceptsWithNotes.slice(0, 12);
+
+            const withNotes = finalConcepts.filter(c => c.hasNotes).length;
+            console.log(`✨ Final: ${finalConcepts.length} concepts (${withNotes} with notes, ${finalConcepts.length - withNotes} pure latent)`);
+
+            return finalConcepts;
+
+        } catch (error) {
+            console.error('Error generating concepts:', error);
+            new Notice(`Failed to generate concepts: ${error.message}`);
+            return [];
+        }
     }
 
     /**

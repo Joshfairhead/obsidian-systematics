@@ -5,7 +5,14 @@ import { SemanticMonadView, VIEW_TYPE_SEMANTIC_MONAD } from './src/semanticMonad
 
 const DEFAULT_SETTINGS: SystematicsSettings = {
     currentGraph: 3,
-    nodeLabelSettings: {}
+    nodeLabelSettings: {},
+
+    // Latent Space Explorer defaults
+    llmProvider: 'ollama',
+    ollamaModel: 'llama2',
+    ollamaEndpoint: 'http://localhost:11434',
+    claudeApiKey: '',
+    openaiApiKey: ''
 };
 
 export default class SystematicsPlugin extends Plugin {
@@ -127,6 +134,9 @@ class SystematicsSettingTab extends PluginSettingTab {
 
         containerEl.createEl('h2', { text: 'Systematics Plugin Settings' });
 
+        // Systematics Graph Settings
+        containerEl.createEl('h3', { text: 'Systematics Graph' });
+
         new Setting(containerEl)
             .setName('Default Graph')
             .setDesc('Select which graph (K3-K12) to display by default')
@@ -141,17 +151,88 @@ class SystematicsSettingTab extends PluginSettingTab {
                 });
             });
 
+        // Latent Space Explorer Settings
+        containerEl.createEl('h3', { text: 'Latent Space Explorer' });
+
+        new Setting(containerEl)
+            .setName('LLM Provider')
+            .setDesc('Choose which LLM to use for concept generation')
+            .addDropdown(dropdown => {
+                dropdown.addOption('ollama', 'Ollama (Local)');
+                dropdown.addOption('claude', 'Claude (API)');
+                dropdown.addOption('openai', 'OpenAI (API)');
+                dropdown.setValue(this.plugin.settings.llmProvider);
+                dropdown.onChange(async (value: 'ollama' | 'claude' | 'openai') => {
+                    this.plugin.settings.llmProvider = value;
+                    await this.plugin.saveSettings();
+                    this.display(); // Refresh to show/hide relevant settings
+                });
+            });
+
+        // Ollama Settings (show if ollama selected)
+        if (this.plugin.settings.llmProvider === 'ollama') {
+            new Setting(containerEl)
+                .setName('Ollama Endpoint')
+                .setDesc('Ollama server URL (default: http://localhost:11434)')
+                .addText(text => text
+                    .setPlaceholder('http://localhost:11434')
+                    .setValue(this.plugin.settings.ollamaEndpoint)
+                    .onChange(async (value) => {
+                        this.plugin.settings.ollamaEndpoint = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(containerEl)
+                .setName('Ollama Model')
+                .setDesc('Model name (e.g., llama2, mistral, phi)')
+                .addText(text => text
+                    .setPlaceholder('llama2')
+                    .setValue(this.plugin.settings.ollamaModel)
+                    .onChange(async (value) => {
+                        this.plugin.settings.ollamaModel = value;
+                        await this.plugin.saveSettings();
+                    }));
+        }
+
+        // Claude Settings (show if claude selected)
+        if (this.plugin.settings.llmProvider === 'claude') {
+            new Setting(containerEl)
+                .setName('Claude API Key')
+                .setDesc('Your Anthropic API key')
+                .addText(text => text
+                    .setPlaceholder('sk-ant-...')
+                    .setValue(this.plugin.settings.claudeApiKey)
+                    .onChange(async (value) => {
+                        this.plugin.settings.claudeApiKey = value;
+                        await this.plugin.saveSettings();
+                    })
+                    .inputEl.type = 'password');
+        }
+
+        // OpenAI Settings (show if openai selected)
+        if (this.plugin.settings.llmProvider === 'openai') {
+            new Setting(containerEl)
+                .setName('OpenAI API Key')
+                .setDesc('Your OpenAI API key')
+                .addText(text => text
+                    .setPlaceholder('sk-...')
+                    .setValue(this.plugin.settings.openaiApiKey)
+                    .onChange(async (value) => {
+                        this.plugin.settings.openaiApiKey = value;
+                        await this.plugin.saveSettings();
+                    })
+                    .inputEl.type = 'password');
+        }
+
         containerEl.createEl('h3', { text: 'About' });
         containerEl.createEl('p', {
-            text: 'This plugin allows you to view and organize your notes using complete graph (Kn) visualizations. Click on nodes to label them and link them to your notes.'
+            text: 'This plugin allows you to view and organize your notes using complete graph (Kn) visualizations and explore semantic latent space.'
         });
 
         containerEl.createEl('h3', { text: 'Usage' });
         const usageList = containerEl.createEl('ul');
-        usageList.createEl('li', { text: 'Click the graph icon in the ribbon or use the command palette to open the Systematics Graph view' });
-        usageList.createEl('li', { text: 'Select a graph type (K3-K12) from the dropdown' });
-        usageList.createEl('li', { text: 'Click on any node to set a custom label and link it to a note' });
-        usageList.createEl('li', { text: 'Nodes with linked notes will appear in blue' });
-        usageList.createEl('li', { text: 'Click on a linked node and select "Open linked note" to navigate to that note' });
+        usageList.createEl('li', { text: 'Systematics Graph: Click the graph icon to visualize Kn graphs' });
+        usageList.createEl('li', { text: 'Latent Space Explorer: Click the compass icon to explore semantic concepts' });
+        usageList.createEl('li', { text: 'Configure your preferred LLM provider above for concept generation' });
     }
 }
