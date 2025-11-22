@@ -10,13 +10,30 @@ export class ProjectionEngine {
     private fitted: boolean = false;
 
     constructor() {
-        // Configure UMAP for visualization
+        // UMAP will be configured dynamically based on data size
         this.umap = new UMAP({
-            nComponents: 2,        // Output 2D
-            nNeighbors: 15,        // Local structure preservation
-            minDist: 0.1,          // Minimum distance between points
-            spread: 1.0,           // Spread of points in embedded space
-            random: () => Math.random()  // Deterministic if needed
+            nComponents: 2,
+            nNeighbors: 15,
+            minDist: 0.1,
+            spread: 1.0,
+            random: () => Math.random()
+        });
+    }
+
+    /**
+     * Configure UMAP based on dataset size
+     */
+    private configureUMAP(dataSize: number): void {
+        // nNeighbors must be less than the number of data points
+        // Use at most 15, but reduce for small datasets
+        const nNeighbors = Math.min(15, Math.max(2, Math.floor(dataSize / 2)));
+
+        this.umap = new UMAP({
+            nComponents: 2,
+            nNeighbors,
+            minDist: 0.1,
+            spread: 1.0,
+            random: () => Math.random()
         });
     }
 
@@ -44,6 +61,9 @@ export class ProjectionEngine {
         }
 
         try {
+            // Configure UMAP based on dataset size
+            this.configureUMAP(embeddings.length);
+
             // Fit UMAP and transform embeddings
             const projected = this.umap.fit(embeddings);
 
