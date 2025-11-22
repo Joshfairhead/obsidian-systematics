@@ -33,6 +33,9 @@ export class SemanticMonadView extends ItemView {
     currentMonad: SemanticMonad | null = null;
     isIndexing: boolean = false;
     conceptPositions: Map<string, Point2D> = new Map();
+    hoveredConcept: string | null = null;
+    animationFrame: number | null = null;
+    animationTime: number = 0;
 
     constructor(leaf: WorkspaceLeaf, plugin: SystematicsPlugin) {
         super(leaf);
@@ -111,7 +114,7 @@ export class SemanticMonadView extends ItemView {
 
         titleRow.createEl('h2', { text: 'Latent Space Explorer' });
         const versionEl = titleRow.createEl('span', {
-            text: 'v0.2.1',
+            text: 'v0.3.0',
             cls: 'version-badge'
         });
         versionEl.style.fontSize = '11px';
@@ -179,8 +182,16 @@ export class SemanticMonadView extends ItemView {
         if (!ctx) throw new Error('Could not get canvas context');
         this.ctx = ctx;
 
-        // Add click handler for canvas
+        // Add click and hover handlers for canvas
         this.canvas.addEventListener('click', (e) => this.handleCanvasClick(e));
+        this.canvas.addEventListener('mousemove', (e) => this.handleCanvasHover(e));
+        this.canvas.addEventListener('mouseleave', () => {
+            this.hoveredConcept = null;
+            this.draw();
+        });
+
+        // Start animation loop
+        this.startAnimation();
 
         // Concepts panel
         const conceptsPanel = leftColumn.createDiv('concepts-panel');
@@ -591,8 +602,8 @@ export class SemanticMonadView extends ItemView {
                 };
             });
 
-            // Return top 12 concepts
-            const finalConcepts = conceptsWithNotes.slice(0, 12);
+            // Return top 18 concepts (increased from 12 for richer visualization)
+            const finalConcepts = conceptsWithNotes.slice(0, 18);
 
             const withNotes = finalConcepts.filter(c => c.hasNotes).length;
             console.log(`✨ Final: ${finalConcepts.length} concepts (${withNotes} with notes, ${finalConcepts.length - withNotes} pure latent)`);
@@ -722,7 +733,74 @@ export class SemanticMonadView extends ItemView {
     }
 
     /**
-     * Draw semantic visualization
+     * Start animation loop for gentle drift
+     */
+    startAnimation() {
+        const animate = () => {
+            this.animationTime += 0.01; // Slow increment
+            this.draw();
+            this.animationFrame = requestAnimationFrame(animate);
+        };
+        animate();
+    }
+
+    /**
+     * Stop animation loop
+     */
+    stopAnimation() {
+        if (this.animationFrame !== null) {
+            cancelAnimationFrame(this.animationFrame);
+            this.animationFrame = null;
+        }
+    }
+
+    /**
+     * Handle mouse hover on canvas
+     */
+    handleCanvasHover(e: MouseEvent) {
+        if (!this.currentMonad) return;
+
+        const rect = this.canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        const centerX = this.canvas.width / 2;
+        const centerY = this.canvas.height / 2;
+        const radius = Math.min(this.canvas.width, this.canvas.height) / 3;
+
+        let foundHover = false;
+
+        // Check if hovering near any concept
+        for (const concept of this.currentMonad.concepts) {
+            if (!concept.position2D) continue;
+
+            const pos = ProjectionEngine.toCanvasCoords(
+                concept.position2D,
+                centerX,
+                centerY,
+                radius * 0.85
+            );
+
+            const dist = Math.sqrt((x - pos.x) ** 2 + (y - pos.y) ** 2);
+
+            if (dist < 20) {  // Hover threshold
+                if (this.hoveredConcept !== concept.term) {
+                    this.hoveredConcept = concept.term;
+                    this.canvas.style.cursor = 'pointer';
+                }
+                foundHover = true;
+                break;
+            }
+        }
+
+        if (!foundHover && this.hoveredConcept !== null) {
+            this.hoveredConcept = null;
+            this.canvas.style.cursor = 'default';
+        }
+    }
+
+    /**
+     * Draw semantic visualization with animation and hover effects
      */
     draw() {
         const width = this.canvas.width;
@@ -769,30 +847,52 @@ export class SemanticMonadView extends ItemView {
         for (const concept of this.currentMonad.concepts) {
             if (!concept.position2D) continue;
 
+            // Add gentle drift: slight rotation over time
+            const driftAngle = Math.sin(this.animationTime + concept.position2D.x) * 0.02;
+            const driftedX = concept.position2D.x * Math.cos(driftAngle) - concept.position2D.y * Math.sin(driftAngle);
+            const driftedY = concept.position2D.x * Math.sin(driftAngle) + concept.position2D.y * Math.cos(driftAngle);
+
             const pos = ProjectionEngine.toCanvasCoords(
-                concept.position2D,
+                { x: driftedX, y: driftedY, label: concept.term },
                 centerX,
                 centerY,
                 radius * 0.85
             );
 
+            // Check if this concept is hovered
+            const isHovered = this.hoveredConcept === concept.term;
+
             // Visual distinction: opacity based on whether concept has notes
-            const opacity = concept.hasNotes ? 1.0 : 0.4;
+            const baseOpacity = concept.hasNotes ? 1.0 : 0.4;
+            const opacity = isHovered ? 1.0 : baseOpacity;
 
             // Draw concept dot (color by similarity)
             const intensity = Math.floor(concept.similarity * 200 + 55);
             this.ctx.globalAlpha = opacity;
+
+            // Glow effect on hover
+            if (isHovered) {
+                this.ctx.shadowBlur = 15;
+                this.ctx.shadowColor = `rgb(${intensity}, 100, ${255 - intensity})`;
+            }
+
             this.ctx.fillStyle = `rgb(${intensity}, 100, ${255 - intensity})`;
             this.ctx.beginPath();
-            this.ctx.arc(pos.x, pos.y, 4, 0, 2 * Math.PI);
+            const dotSize = isHovered ? 7 : 4;  // Larger on hover
+            this.ctx.arc(pos.x, pos.y, dotSize, 0, 2 * Math.PI);
             this.ctx.fill();
 
-            // Draw concept label
-            this.ctx.fillStyle = textColor;
-            this.ctx.fillText(concept.term, pos.x, pos.y - 10);
+            // Reset shadow
+            this.ctx.shadowBlur = 0;
 
-            // Reset alpha
+            // Draw concept label (larger and bold on hover)
+            this.ctx.fillStyle = textColor;
+            this.ctx.font = isHovered ? 'bold 12px sans-serif' : '11px sans-serif';
+            this.ctx.fillText(concept.term, pos.x, pos.y - 12);
+
+            // Reset alpha and font
             this.ctx.globalAlpha = 1.0;
+            this.ctx.font = '11px sans-serif';
         }
     }
 
@@ -1056,6 +1156,7 @@ export class SemanticMonadView extends ItemView {
     }
 
     async onClose() {
+        this.stopAnimation();
         this.vectorIndex.close();
     }
 }
