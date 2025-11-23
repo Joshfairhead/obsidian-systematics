@@ -127,7 +127,7 @@ export class SemanticMonadView extends ItemView {
 
         titleRow.createEl('h2', { text: 'Latent Space Explorer' });
         const versionEl = titleRow.createEl('span', {
-            text: 'v0.5.1',
+            text: 'v0.5.2',
             cls: 'version-badge'
         });
         versionEl.style.fontSize = '11px';
@@ -1355,14 +1355,25 @@ class PhysicsSettingsModal extends Modal {
         const { contentEl } = this;
         contentEl.empty();
 
-        contentEl.createEl('h2', { text: 'Physics Settings' });
+        // Style the modal to be smaller and positioned on the right
+        const modalEl = contentEl.closest('.modal') as HTMLElement;
+        if (modalEl) {
+            modalEl.style.width = '320px';
+            modalEl.style.maxWidth = '320px';
+            modalEl.style.right = '20px';
+            modalEl.style.left = 'auto';
+            modalEl.style.top = '80px';
+            modalEl.style.transform = 'none';
+        }
+
+        contentEl.createEl('h3', { text: 'Physics Settings' });
 
         // Create controls container
         const controls = contentEl.createDiv();
         controls.style.display = 'flex';
         controls.style.flexDirection = 'column';
-        controls.style.gap = '15px';
-        controls.style.padding = '10px 0';
+        controls.style.gap = '12px';
+        controls.style.padding = '5px 0';
 
         // Repulsion strength
         this.createSlider(
@@ -1426,11 +1437,12 @@ class PhysicsSettingsModal extends Modal {
 
         // Reset button
         const buttonRow = contentEl.createDiv();
-        buttonRow.style.marginTop = '20px';
+        buttonRow.style.marginTop = '15px';
         buttonRow.style.display = 'flex';
-        buttonRow.style.gap = '10px';
+        buttonRow.style.gap = '8px';
 
-        const resetButton = buttonRow.createEl('button', { text: 'Reset to Defaults' });
+        const resetButton = buttonRow.createEl('button', { text: 'Reset' });
+        resetButton.style.flex = '1';
         resetButton.addEventListener('click', () => {
             this.view.repulsionStrength = 0.00005;
             this.view.friction = 0.004;
@@ -1441,6 +1453,7 @@ class PhysicsSettingsModal extends Modal {
         });
 
         const closeButton = buttonRow.createEl('button', { text: 'Close' });
+        closeButton.style.flex = '1';
         closeButton.addEventListener('click', () => this.close());
     }
 
@@ -1467,16 +1480,17 @@ class PhysicsSettingsModal extends Modal {
 
         const labelEl = labelRow.createEl('label', { text: label });
         labelEl.style.fontWeight = '500';
+        labelEl.style.fontSize = '13px';
 
         const valueEl = labelRow.createEl('span', { text: initialValue.toFixed(decimals) });
         valueEl.style.color = 'var(--text-muted)';
-        valueEl.style.fontSize = '12px';
+        valueEl.style.fontSize = '11px';
         valueEl.style.fontFamily = 'monospace';
 
         const descEl = controlDiv.createEl('div', { text: description });
-        descEl.style.fontSize = '11px';
+        descEl.style.fontSize = '10px';
         descEl.style.color = 'var(--text-muted)';
-        descEl.style.marginBottom = '5px';
+        descEl.style.marginBottom = '3px';
 
         const slider = controlDiv.createEl('input', { type: 'range' });
         slider.min = min.toString();
