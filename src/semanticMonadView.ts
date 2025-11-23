@@ -127,7 +127,7 @@ export class SemanticMonadView extends ItemView {
 
         titleRow.createEl('h2', { text: 'Latent Space Explorer' });
         const versionEl = titleRow.createEl('span', {
-            text: 'v0.5.2',
+            text: 'v0.5.3',
             cls: 'version-badge'
         });
         versionEl.style.fontSize = '11px';
@@ -802,19 +802,6 @@ export class SemanticMonadView extends ItemView {
                 }
             }
 
-            // Repulsion from center node (query point at origin)
-            const centerDx = conceptA.position2D.x - 0; // Center is at (0, 0)
-            const centerDy = conceptA.position2D.y - 0;
-            const centerDistSq = centerDx * centerDx + centerDy * centerDy;
-            const centerDist = Math.sqrt(centerDistSq);
-
-            if (centerDist > 0.001) {
-                // Center repels just like other concepts
-                const centerForce = this.repulsionStrength / (centerDistSq + 0.1);
-                fx += (centerDx / centerDist) * centerForce;
-                fy += (centerDy / centerDist) * centerForce;
-            }
-
             // Update velocity with force and friction
             // Friction: 0 = no friction (free movement), 1 = full friction (no movement)
             velA.vx = (velA.vx + fx) * (1 - this.friction);
@@ -1345,6 +1332,9 @@ export class SemanticMonadView extends ItemView {
  */
 class PhysicsSettingsModal extends Modal {
     view: SemanticMonadView;
+    isDragging: boolean = false;
+    dragOffset: { x: number; y: number } = { x: 0, y: 0 };
+    modalEl: HTMLElement | null = null;
 
     constructor(app: any, view: SemanticMonadView) {
         super(app);
@@ -1356,17 +1346,25 @@ class PhysicsSettingsModal extends Modal {
         contentEl.empty();
 
         // Style the modal to be smaller and positioned on the right
-        const modalEl = contentEl.closest('.modal') as HTMLElement;
-        if (modalEl) {
-            modalEl.style.width = '320px';
-            modalEl.style.maxWidth = '320px';
-            modalEl.style.right = '20px';
-            modalEl.style.left = 'auto';
-            modalEl.style.top = '80px';
-            modalEl.style.transform = 'none';
+        this.modalEl = contentEl.closest('.modal') as HTMLElement;
+        if (this.modalEl) {
+            this.modalEl.style.width = '320px';
+            this.modalEl.style.maxWidth = '320px';
+            this.modalEl.style.position = 'fixed';
+            this.modalEl.style.right = '20px';
+            this.modalEl.style.left = 'auto';
+            this.modalEl.style.top = '80px';
+            this.modalEl.style.transform = 'none';
         }
 
-        contentEl.createEl('h3', { text: 'Physics Settings' });
+        const header = contentEl.createEl('h3', { text: 'Physics Settings' });
+        header.style.cursor = 'move';
+        header.style.userSelect = 'none';
+
+        // Make header draggable
+        header.addEventListener('mousedown', (e) => this.handleDragStart(e));
+        document.addEventListener('mousemove', (e) => this.handleDrag(e));
+        document.addEventListener('mouseup', () => this.handleDragEnd());
 
         // Create controls container
         const controls = contentEl.createDiv();
@@ -1504,6 +1502,37 @@ class PhysicsSettingsModal extends Modal {
             valueEl.textContent = value.toFixed(decimals);
             onChange(value);
         });
+    }
+
+    handleDragStart(e: MouseEvent) {
+        if (!this.modalEl) return;
+
+        this.isDragging = true;
+        const rect = this.modalEl.getBoundingClientRect();
+        this.dragOffset = {
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top
+        };
+        e.preventDefault();
+    }
+
+    handleDrag(e: MouseEvent) {
+        if (!this.isDragging || !this.modalEl) return;
+
+        const x = e.clientX - this.dragOffset.x;
+        const y = e.clientY - this.dragOffset.y;
+
+        // Keep modal within viewport
+        const maxX = window.innerWidth - this.modalEl.offsetWidth;
+        const maxY = window.innerHeight - this.modalEl.offsetHeight;
+
+        this.modalEl.style.left = Math.max(0, Math.min(x, maxX)) + 'px';
+        this.modalEl.style.top = Math.max(0, Math.min(y, maxY)) + 'px';
+        this.modalEl.style.right = 'auto';
+    }
+
+    handleDragEnd() {
+        this.isDragging = false;
     }
 
     onClose() {
