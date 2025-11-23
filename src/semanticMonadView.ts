@@ -928,8 +928,11 @@ export class SemanticMonadView extends ItemView {
         if (!this.currentMonad) return;
 
         const rect = this.canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
+        // Scale mouse coordinates from display size to canvas size
+        const scaleX = this.canvas.width / rect.width;
+        const scaleY = this.canvas.height / rect.height;
+        const x = (e.clientX - rect.left) * scaleX;
+        const y = (e.clientY - rect.top) * scaleY;
 
         // Store mouse down position to detect click vs drag
         this.mouseDownPos = { x, y };
@@ -971,8 +974,11 @@ export class SemanticMonadView extends ItemView {
         if (!this.currentMonad) return;
 
         const rect = this.canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
+        // Scale mouse coordinates from display size to canvas size
+        const scaleX = this.canvas.width / rect.width;
+        const scaleY = this.canvas.height / rect.height;
+        const x = (e.clientX - rect.left) * scaleX;
+        const y = (e.clientY - rect.top) * scaleY;
 
         const centerX = this.canvas.width / 2;
         const centerY = this.canvas.height / 2;
