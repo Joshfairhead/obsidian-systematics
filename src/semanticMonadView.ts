@@ -45,10 +45,11 @@ export class SemanticMonadView extends ItemView {
     mouseDownPos: { x: number; y: number } | null = null;
 
     // Physics parameters (adjustable via UI)
-    repulsionStrength: number = 0.00005;
-    friction: number = 0.004; // 0 = no friction (free movement), 1 = full friction (no movement)
-    boundaryDistance: number = 0.85; // Maximum distance from center
-    boundarySoftness: number = 0.3; // How much velocity is kept when hitting boundary
+    repulsionStrength: number = 0.00090;
+    friction: number = 0.900; // 0 = no friction (free movement), 1 = full friction (no movement)
+    boundaryDistance: number = 0.90; // Maximum distance from center
+    boundarySoftness: number = 1.0; // How much velocity is kept when hitting boundary
+    brownianMotion: number = 0.00002; // Random movement strength
 
     constructor(leaf: WorkspaceLeaf, plugin: SystematicsPlugin) {
         super(leaf);
@@ -127,7 +128,7 @@ export class SemanticMonadView extends ItemView {
 
         titleRow.createEl('h2', { text: 'Latent Space Explorer' });
         const versionEl = titleRow.createEl('span', {
-            text: 'v0.5.5',
+            text: 'v0.6.0',
             cls: 'version-badge'
         });
         versionEl.style.fontSize = '11px';
@@ -802,6 +803,10 @@ export class SemanticMonadView extends ItemView {
                 }
             }
 
+            // Add Brownian motion (random thermal movement)
+            fx += (Math.random() - 0.5) * this.brownianMotion;
+            fy += (Math.random() - 0.5) * this.brownianMotion;
+
             // Update velocity with force and friction
             // Friction: 0 = no friction (free movement), 1 = full friction (no movement)
             velA.vx = (velA.vx + fx) * (1 - this.friction);
@@ -1336,6 +1341,10 @@ class PhysicsSettingsModal extends Modal {
     dragOffset: { x: number; y: number } = { x: 0, y: 0 };
     draggableEl: HTMLElement | null = null;
 
+    // Bound methods for event cleanup
+    boundHandleDrag: ((e: MouseEvent) => void) | null = null;
+    boundHandleDragEnd: (() => void) | null = null;
+
     constructor(app: any, view: SemanticMonadView) {
         super(app);
         this.view = view;
@@ -1363,8 +1372,6 @@ class PhysicsSettingsModal extends Modal {
 
         // Make header draggable
         header.addEventListener('mousedown', (e) => this.handleDragStart(e));
-        document.addEventListener('mousemove', (e) => this.handleDrag(e));
-        document.addEventListener('mouseup', () => this.handleDragEnd());
 
         // Create controls container
         const controls = contentEl.createDiv();
@@ -1433,6 +1440,21 @@ class PhysicsSettingsModal extends Modal {
             }
         );
 
+        // Brownian motion
+        this.createSlider(
+            controls,
+            'Brownian Motion',
+            'Random thermal movement (0 = none, higher = more jitter)',
+            this.view.brownianMotion,
+            0,
+            0.0001,
+            0.000001,
+            6,
+            (value) => {
+                this.view.brownianMotion = value;
+            }
+        );
+
         // Reset button
         const buttonRow = contentEl.createDiv();
         buttonRow.style.marginTop = '15px';
@@ -1442,10 +1464,11 @@ class PhysicsSettingsModal extends Modal {
         const resetButton = buttonRow.createEl('button', { text: 'Reset' });
         resetButton.style.flex = '1';
         resetButton.addEventListener('click', () => {
-            this.view.repulsionStrength = 0.00005;
-            this.view.friction = 0.004;
-            this.view.boundaryDistance = 0.85;
-            this.view.boundarySoftness = 0.3;
+            this.view.repulsionStrength = 0.00090;
+            this.view.friction = 0.900;
+            this.view.boundaryDistance = 0.90;
+            this.view.boundarySoftness = 1.0;
+            this.view.brownianMotion = 0.00002;
             this.close();
             new PhysicsSettingsModal(this.app, this.view).open();
         });
@@ -1514,6 +1537,13 @@ class PhysicsSettingsModal extends Modal {
             y: e.clientY - rect.top
         };
         e.preventDefault();
+
+        // Bind event handlers
+        this.boundHandleDrag = (e: MouseEvent) => this.handleDrag(e);
+        this.boundHandleDragEnd = () => this.handleDragEnd();
+
+        document.addEventListener('mousemove', this.boundHandleDrag);
+        document.addEventListener('mouseup', this.boundHandleDragEnd);
     }
 
     handleDrag(e: MouseEvent) {
@@ -1530,6 +1560,16 @@ class PhysicsSettingsModal extends Modal {
 
     handleDragEnd() {
         this.isDragging = false;
+
+        // Clean up event listeners
+        if (this.boundHandleDrag) {
+            document.removeEventListener('mousemove', this.boundHandleDrag);
+            this.boundHandleDrag = null;
+        }
+        if (this.boundHandleDragEnd) {
+            document.removeEventListener('mouseup', this.boundHandleDragEnd);
+            this.boundHandleDragEnd = null;
+        }
     }
 
     onClose() {
