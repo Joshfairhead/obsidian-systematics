@@ -44,6 +44,10 @@ export class SemanticMonadView extends ItemView {
     isDragging: boolean = false;
     mouseDownPos: { x: number; y: number } | null = null;
 
+    // Physics parameters (adjustable via UI)
+    repulsionStrength: number = 0.00005;
+    damping: number = 0.996;
+
     constructor(leaf: WorkspaceLeaf, plugin: SystematicsPlugin) {
         super(leaf);
         this.plugin = plugin;
@@ -121,7 +125,7 @@ export class SemanticMonadView extends ItemView {
 
         titleRow.createEl('h2', { text: 'Latent Space Explorer' });
         const versionEl = titleRow.createEl('span', {
-            text: 'v0.4.6',
+            text: 'v0.5.0',
             cls: 'version-badge'
         });
         versionEl.style.fontSize = '11px';
@@ -173,6 +177,67 @@ export class SemanticMonadView extends ItemView {
             if (e.key === 'Enter') {
                 this.handleSemanticSearch();
             }
+        });
+
+        // Physics controls
+        const physicsSection = container.createDiv('physics-section');
+        physicsSection.style.marginBottom = '10px';
+        physicsSection.style.padding = '10px';
+        physicsSection.style.backgroundColor = 'var(--background-secondary)';
+        physicsSection.style.borderRadius = '4px';
+
+        const physicsHeader = physicsSection.createDiv();
+        physicsHeader.style.cursor = 'pointer';
+        physicsHeader.style.fontWeight = 'bold';
+        physicsHeader.style.marginBottom = '8px';
+        physicsHeader.textContent = '⚙️ Physics Controls (click to expand)';
+
+        const physicsControls = physicsSection.createDiv();
+        physicsControls.style.display = 'none';
+
+        let isPhysicsExpanded = false;
+        physicsHeader.addEventListener('click', () => {
+            isPhysicsExpanded = !isPhysicsExpanded;
+            physicsControls.style.display = isPhysicsExpanded ? 'block' : 'none';
+            physicsHeader.textContent = isPhysicsExpanded ? '⚙️ Physics Controls (click to collapse)' : '⚙️ Physics Controls (click to expand)';
+        });
+
+        // Repulsion slider
+        const repulsionControl = physicsControls.createDiv();
+        repulsionControl.style.marginBottom = '8px';
+        repulsionControl.createEl('label', { text: 'Repulsion: ' });
+        const repulsionValue = repulsionControl.createEl('span', { text: this.repulsionStrength.toFixed(5) });
+        repulsionValue.style.marginLeft = '10px';
+        repulsionValue.style.color = 'var(--text-muted)';
+        const repulsionSlider = repulsionControl.createEl('input', { type: 'range' });
+        repulsionSlider.min = '0';
+        repulsionSlider.max = '0.001';
+        repulsionSlider.step = '0.00001';
+        repulsionSlider.value = this.repulsionStrength.toString();
+        repulsionSlider.style.width = '200px';
+        repulsionSlider.style.marginLeft = '10px';
+        repulsionSlider.addEventListener('input', (e) => {
+            this.repulsionStrength = parseFloat((e.target as HTMLInputElement).value);
+            repulsionValue.textContent = this.repulsionStrength.toFixed(5);
+        });
+
+        // Damping slider
+        const dampingControl = physicsControls.createDiv();
+        dampingControl.style.marginBottom = '8px';
+        dampingControl.createEl('label', { text: 'Damping: ' });
+        const dampingValue = dampingControl.createEl('span', { text: this.damping.toFixed(3) });
+        dampingValue.style.marginLeft = '10px';
+        dampingValue.style.color = 'var(--text-muted)';
+        const dampingSlider = dampingControl.createEl('input', { type: 'range' });
+        dampingSlider.min = '0.9';
+        dampingSlider.max = '0.999';
+        dampingSlider.step = '0.001';
+        dampingSlider.value = this.damping.toString();
+        dampingSlider.style.width = '200px';
+        dampingSlider.style.marginLeft = '10px';
+        dampingSlider.addEventListener('input', (e) => {
+            this.damping = parseFloat((e.target as HTMLInputElement).value);
+            dampingValue.textContent = this.damping.toFixed(3);
         });
 
         // Two-column layout
@@ -752,9 +817,6 @@ export class SemanticMonadView extends ItemView {
         if (!this.currentMonad) return;
 
         const concepts = this.currentMonad.concepts;
-        const repulsionStrength = 0.00005; // Very gentle repulsion with smooth falloff
-        const centerAttractionStrength = 0.00015; // Gentle pull toward center
-        const damping = 0.996; // Very high damping for slow, smooth movement
         const maxRadius = 0.85; // Maximum distance from center (boundary constraint)
 
         // Apply repulsion between all concepts
@@ -785,25 +847,28 @@ export class SemanticMonadView extends ItemView {
 
                 if (dist > 0.001) {  // Avoid division by zero
                     // Smooth inverse distance repulsion (gentle falloff, no hard boundary)
-                    const force = repulsionStrength / (distSq + 0.1);
+                    const force = this.repulsionStrength / (distSq + 0.1);
                     fx += (dx / dist) * force;
                     fy += (dy / dist) * force;
                 }
             }
 
-            // Simple attraction to center (pulls toward origin)
-            const distFromCenter = Math.sqrt(
-                conceptA.position2D.x ** 2 + conceptA.position2D.y ** 2
-            );
-            if (distFromCenter > 0.001) {
-                // Pull toward center, stronger when farther away
-                fx -= conceptA.position2D.x * centerAttractionStrength;
-                fy -= conceptA.position2D.y * centerAttractionStrength;
+            // Repulsion from center node (query point at origin)
+            const centerDx = conceptA.position2D.x - 0; // Center is at (0, 0)
+            const centerDy = conceptA.position2D.y - 0;
+            const centerDistSq = centerDx * centerDx + centerDy * centerDy;
+            const centerDist = Math.sqrt(centerDistSq);
+
+            if (centerDist > 0.001) {
+                // Center repels just like other concepts
+                const centerForce = this.repulsionStrength / (centerDistSq + 0.1);
+                fx += (centerDx / centerDist) * centerForce;
+                fy += (centerDy / centerDist) * centerForce;
             }
 
             // Update velocity with damping
-            velA.vx = (velA.vx + fx) * damping;
-            velA.vy = (velA.vy + fy) * damping;
+            velA.vx = (velA.vx + fx) * this.damping;
+            velA.vy = (velA.vy + fy) * this.damping;
 
             // Update position
             conceptA.position2D.x += velA.vx;
