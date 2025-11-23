@@ -121,7 +121,7 @@ export class SemanticMonadView extends ItemView {
 
         titleRow.createEl('h2', { text: 'Latent Space Explorer' });
         const versionEl = titleRow.createEl('span', {
-            text: 'v0.4.4',
+            text: 'v0.4.5',
             cls: 'version-badge'
         });
         versionEl.style.fontSize = '11px';
@@ -752,9 +752,9 @@ export class SemanticMonadView extends ItemView {
         if (!this.currentMonad) return;
 
         const concepts = this.currentMonad.concepts;
-        const repulsionStrength = 0.0005; // Extremely gentle repulsion
-        const centerAttractionStrength = 0.0005; // Extremely gentle center pull
-        const damping = 0.99; // Very high damping for minimal movement
+        const repulsionStrength = 0.0001; // Minimal repulsion for subtle movement
+        const centerAttractionStrength = 0.0003; // Gentle center pull
+        const damping = 0.995; // Very high damping for almost static appearance
         const minDistance = 0.25; // Start repelling at slightly greater distance
         const maxRadius = 0.85; // Maximum distance from center (boundary constraint)
 
