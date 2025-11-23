@@ -121,7 +121,7 @@ export class SemanticMonadView extends ItemView {
 
         titleRow.createEl('h2', { text: 'Latent Space Explorer' });
         const versionEl = titleRow.createEl('span', {
-            text: 'v0.4.5',
+            text: 'v0.4.6',
             cls: 'version-badge'
         });
         versionEl.style.fontSize = '11px';
@@ -752,10 +752,9 @@ export class SemanticMonadView extends ItemView {
         if (!this.currentMonad) return;
 
         const concepts = this.currentMonad.concepts;
-        const repulsionStrength = 0.0001; // Minimal repulsion for subtle movement
-        const centerAttractionStrength = 0.0003; // Gentle center pull
-        const damping = 0.995; // Very high damping for almost static appearance
-        const minDistance = 0.25; // Start repelling at slightly greater distance
+        const repulsionStrength = 0.00005; // Very gentle repulsion with smooth falloff
+        const centerAttractionStrength = 0.00015; // Gentle pull toward center
+        const damping = 0.996; // Very high damping for slow, smooth movement
         const maxRadius = 0.85; // Maximum distance from center (boundary constraint)
 
         // Apply repulsion between all concepts
@@ -773,7 +772,7 @@ export class SemanticMonadView extends ItemView {
 
             let fx = 0, fy = 0;
 
-            // Repulsion from other concepts
+            // Soft repulsion from other concepts (inverse distance, no hard threshold)
             for (let j = 0; j < concepts.length; j++) {
                 if (i === j) continue;
                 const conceptB = concepts[j];
@@ -781,28 +780,28 @@ export class SemanticMonadView extends ItemView {
 
                 const dx = conceptA.position2D.x - conceptB.position2D.x;
                 const dy = conceptA.position2D.y - conceptB.position2D.y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
+                const distSq = dx * dx + dy * dy;
+                const dist = Math.sqrt(distSq);
 
-                if (dist < minDistance) {
-                    // Gentle repulsion when too close
-                    const force = repulsionStrength / (dist + 0.01);
+                if (dist > 0.001) {  // Avoid division by zero
+                    // Smooth inverse distance repulsion (gentle falloff, no hard boundary)
+                    const force = repulsionStrength / (distSq + 0.1);
                     fx += (dx / dist) * force;
                     fy += (dy / dist) * force;
                 }
             }
 
-            // Weak attraction to ideal circular radius (keeps from flying off)
-            const dist = Math.sqrt(
+            // Simple attraction to center (pulls toward origin)
+            const distFromCenter = Math.sqrt(
                 conceptA.position2D.x ** 2 + conceptA.position2D.y ** 2
             );
-            const targetRadius = 0.7;
-            if (dist > 0) {
-                const centerForce = (dist - targetRadius) * centerAttractionStrength;
-                fx -= (conceptA.position2D.x / dist) * centerForce;
-                fy -= (conceptA.position2D.y / dist) * centerForce;
+            if (distFromCenter > 0.001) {
+                // Pull toward center, stronger when farther away
+                fx -= conceptA.position2D.x * centerAttractionStrength;
+                fy -= conceptA.position2D.y * centerAttractionStrength;
             }
 
-            // Update velocity
+            // Update velocity with damping
             velA.vx = (velA.vx + fx) * damping;
             velA.vy = (velA.vy + fy) * damping;
 
