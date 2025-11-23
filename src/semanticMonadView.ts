@@ -2,7 +2,7 @@
  * Semantic Monad View - Embedding-based knowledge exploration
  */
 
-import { ItemView, WorkspaceLeaf, TFile, Notice } from 'obsidian';
+import { ItemView, WorkspaceLeaf, TFile, Notice, Modal } from 'obsidian';
 import SystematicsPlugin from '../main';
 import { EmbeddingService } from './embeddingService';
 import { VectorIndex } from './vectorIndex';
@@ -46,7 +46,9 @@ export class SemanticMonadView extends ItemView {
 
     // Physics parameters (adjustable via UI)
     repulsionStrength: number = 0.00005;
-    damping: number = 0.996;
+    friction: number = 0.004; // 0 = no friction (free movement), 1 = full friction (no movement)
+    boundaryDistance: number = 0.85; // Maximum distance from center
+    boundarySoftness: number = 0.3; // How much velocity is kept when hitting boundary
 
     constructor(leaf: WorkspaceLeaf, plugin: SystematicsPlugin) {
         super(leaf);
@@ -125,7 +127,7 @@ export class SemanticMonadView extends ItemView {
 
         titleRow.createEl('h2', { text: 'Latent Space Explorer' });
         const versionEl = titleRow.createEl('span', {
-            text: 'v0.5.0',
+            text: 'v0.5.1',
             cls: 'version-badge'
         });
         versionEl.style.fontSize = '11px';
@@ -179,65 +181,13 @@ export class SemanticMonadView extends ItemView {
             }
         });
 
-        // Physics controls
-        const physicsSection = container.createDiv('physics-section');
-        physicsSection.style.marginBottom = '10px';
-        physicsSection.style.padding = '10px';
-        physicsSection.style.backgroundColor = 'var(--background-secondary)';
-        physicsSection.style.borderRadius = '4px';
-
-        const physicsHeader = physicsSection.createDiv();
-        physicsHeader.style.cursor = 'pointer';
-        physicsHeader.style.fontWeight = 'bold';
-        physicsHeader.style.marginBottom = '8px';
-        physicsHeader.textContent = '⚙️ Physics Controls (click to expand)';
-
-        const physicsControls = physicsSection.createDiv();
-        physicsControls.style.display = 'none';
-
-        let isPhysicsExpanded = false;
-        physicsHeader.addEventListener('click', () => {
-            isPhysicsExpanded = !isPhysicsExpanded;
-            physicsControls.style.display = isPhysicsExpanded ? 'block' : 'none';
-            physicsHeader.textContent = isPhysicsExpanded ? '⚙️ Physics Controls (click to collapse)' : '⚙️ Physics Controls (click to expand)';
-        });
-
-        // Repulsion slider
-        const repulsionControl = physicsControls.createDiv();
-        repulsionControl.style.marginBottom = '8px';
-        repulsionControl.createEl('label', { text: 'Repulsion: ' });
-        const repulsionValue = repulsionControl.createEl('span', { text: this.repulsionStrength.toFixed(5) });
-        repulsionValue.style.marginLeft = '10px';
-        repulsionValue.style.color = 'var(--text-muted)';
-        const repulsionSlider = repulsionControl.createEl('input', { type: 'range' });
-        repulsionSlider.min = '0';
-        repulsionSlider.max = '0.001';
-        repulsionSlider.step = '0.00001';
-        repulsionSlider.value = this.repulsionStrength.toString();
-        repulsionSlider.style.width = '200px';
-        repulsionSlider.style.marginLeft = '10px';
-        repulsionSlider.addEventListener('input', (e) => {
-            this.repulsionStrength = parseFloat((e.target as HTMLInputElement).value);
-            repulsionValue.textContent = this.repulsionStrength.toFixed(5);
-        });
-
-        // Damping slider
-        const dampingControl = physicsControls.createDiv();
-        dampingControl.style.marginBottom = '8px';
-        dampingControl.createEl('label', { text: 'Damping: ' });
-        const dampingValue = dampingControl.createEl('span', { text: this.damping.toFixed(3) });
-        dampingValue.style.marginLeft = '10px';
-        dampingValue.style.color = 'var(--text-muted)';
-        const dampingSlider = dampingControl.createEl('input', { type: 'range' });
-        dampingSlider.min = '0.9';
-        dampingSlider.max = '0.999';
-        dampingSlider.step = '0.001';
-        dampingSlider.value = this.damping.toString();
-        dampingSlider.style.width = '200px';
-        dampingSlider.style.marginLeft = '10px';
-        dampingSlider.addEventListener('input', (e) => {
-            this.damping = parseFloat((e.target as HTMLInputElement).value);
-            dampingValue.textContent = this.damping.toFixed(3);
+        // Physics settings button
+        const settingsButton = inputRow.createEl('button', { cls: 'clickable-icon' });
+        settingsButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12 1v6m0 6v6m0-15a9 9 0 0 1 9 9m-9-9a9 9 0 0 0-9 9m18 0a9 9 0 0 1-9 9m9-9h-6m-6 0H1m11 9a9 9 0 0 0 9-9"></path></svg>';
+        settingsButton.title = 'Physics Settings';
+        settingsButton.style.marginLeft = '5px';
+        settingsButton.addEventListener('click', () => {
+            new PhysicsSettingsModal(this.app, this).open();
         });
 
         // Two-column layout
@@ -811,13 +761,12 @@ export class SemanticMonadView extends ItemView {
     }
 
     /**
-     * Apply physics forces to concepts (repulsion + center attraction)
+     * Apply physics forces to concepts (repulsion + friction)
      */
     applyForces() {
         if (!this.currentMonad) return;
 
         const concepts = this.currentMonad.concepts;
-        const maxRadius = 0.85; // Maximum distance from center (boundary constraint)
 
         // Apply repulsion between all concepts
         for (let i = 0; i < concepts.length; i++) {
@@ -866,9 +815,10 @@ export class SemanticMonadView extends ItemView {
                 fy += (centerDy / centerDist) * centerForce;
             }
 
-            // Update velocity with damping
-            velA.vx = (velA.vx + fx) * this.damping;
-            velA.vy = (velA.vy + fy) * this.damping;
+            // Update velocity with force and friction
+            // Friction: 0 = no friction (free movement), 1 = full friction (no movement)
+            velA.vx = (velA.vx + fx) * (1 - this.friction);
+            velA.vy = (velA.vy + fy) * (1 - this.friction);
 
             // Update position
             conceptA.position2D.x += velA.vx;
@@ -878,14 +828,14 @@ export class SemanticMonadView extends ItemView {
             const newDist = Math.sqrt(
                 conceptA.position2D.x ** 2 + conceptA.position2D.y ** 2
             );
-            if (newDist > maxRadius) {
-                // Clamp to boundary and stop velocity
-                const scale = maxRadius / newDist;
+            if (newDist > this.boundaryDistance) {
+                // Clamp to boundary
+                const scale = this.boundaryDistance / newDist;
                 conceptA.position2D.x *= scale;
                 conceptA.position2D.y *= scale;
-                // Dampen velocity significantly when hitting boundary
-                velA.vx *= 0.3;
-                velA.vy *= 0.3;
+                // Reduce velocity when hitting boundary
+                velA.vx *= this.boundarySoftness;
+                velA.vy *= this.boundarySoftness;
             }
 
             // Update stored position
@@ -1387,5 +1337,163 @@ export class SemanticMonadView extends ItemView {
     async onClose() {
         this.stopAnimation();
         this.vectorIndex.close();
+    }
+}
+
+/**
+ * Physics Settings Modal
+ */
+class PhysicsSettingsModal extends Modal {
+    view: SemanticMonadView;
+
+    constructor(app: any, view: SemanticMonadView) {
+        super(app);
+        this.view = view;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.empty();
+
+        contentEl.createEl('h2', { text: 'Physics Settings' });
+
+        // Create controls container
+        const controls = contentEl.createDiv();
+        controls.style.display = 'flex';
+        controls.style.flexDirection = 'column';
+        controls.style.gap = '15px';
+        controls.style.padding = '10px 0';
+
+        // Repulsion strength
+        this.createSlider(
+            controls,
+            'Repulsion Strength',
+            'How strongly nodes push each other away',
+            this.view.repulsionStrength,
+            0,
+            0.001,
+            0.00001,
+            5,
+            (value) => {
+                this.view.repulsionStrength = value;
+            }
+        );
+
+        // Friction
+        this.createSlider(
+            controls,
+            'Friction',
+            '0 = smooth movement, 1 = sticky/static',
+            this.view.friction,
+            0,
+            1,
+            0.001,
+            3,
+            (value) => {
+                this.view.friction = value;
+            }
+        );
+
+        // Boundary distance
+        this.createSlider(
+            controls,
+            'Boundary Distance',
+            'How far nodes can be from center',
+            this.view.boundaryDistance,
+            0.5,
+            1.0,
+            0.01,
+            2,
+            (value) => {
+                this.view.boundaryDistance = value;
+            }
+        );
+
+        // Boundary softness
+        this.createSlider(
+            controls,
+            'Boundary Softness',
+            'How bouncy the boundary is (0 = hard wall, 1 = soft)',
+            this.view.boundarySoftness,
+            0,
+            1,
+            0.05,
+            2,
+            (value) => {
+                this.view.boundarySoftness = value;
+            }
+        );
+
+        // Reset button
+        const buttonRow = contentEl.createDiv();
+        buttonRow.style.marginTop = '20px';
+        buttonRow.style.display = 'flex';
+        buttonRow.style.gap = '10px';
+
+        const resetButton = buttonRow.createEl('button', { text: 'Reset to Defaults' });
+        resetButton.addEventListener('click', () => {
+            this.view.repulsionStrength = 0.00005;
+            this.view.friction = 0.004;
+            this.view.boundaryDistance = 0.85;
+            this.view.boundarySoftness = 0.3;
+            this.close();
+            new PhysicsSettingsModal(this.app, this.view).open();
+        });
+
+        const closeButton = buttonRow.createEl('button', { text: 'Close' });
+        closeButton.addEventListener('click', () => this.close());
+    }
+
+    createSlider(
+        container: HTMLElement,
+        label: string,
+        description: string,
+        initialValue: number,
+        min: number,
+        max: number,
+        step: number,
+        decimals: number,
+        onChange: (value: number) => void
+    ) {
+        const controlDiv = container.createDiv();
+        controlDiv.style.display = 'flex';
+        controlDiv.style.flexDirection = 'column';
+        controlDiv.style.gap = '5px';
+
+        const labelRow = controlDiv.createDiv();
+        labelRow.style.display = 'flex';
+        labelRow.style.justifyContent = 'space-between';
+        labelRow.style.alignItems = 'center';
+
+        const labelEl = labelRow.createEl('label', { text: label });
+        labelEl.style.fontWeight = '500';
+
+        const valueEl = labelRow.createEl('span', { text: initialValue.toFixed(decimals) });
+        valueEl.style.color = 'var(--text-muted)';
+        valueEl.style.fontSize = '12px';
+        valueEl.style.fontFamily = 'monospace';
+
+        const descEl = controlDiv.createEl('div', { text: description });
+        descEl.style.fontSize = '11px';
+        descEl.style.color = 'var(--text-muted)';
+        descEl.style.marginBottom = '5px';
+
+        const slider = controlDiv.createEl('input', { type: 'range' });
+        slider.min = min.toString();
+        slider.max = max.toString();
+        slider.step = step.toString();
+        slider.value = initialValue.toString();
+        slider.style.width = '100%';
+
+        slider.addEventListener('input', (e) => {
+            const value = parseFloat((e.target as HTMLInputElement).value);
+            valueEl.textContent = value.toFixed(decimals);
+            onChange(value);
+        });
+    }
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
     }
 }
