@@ -191,6 +191,69 @@ export class SemanticMonadView extends ItemView {
             new PhysicsSettingsModal(this.app, this).open();
         });
 
+        // Concept count controls
+        const conceptControlsSection = searchSection.createDiv('concept-controls');
+        conceptControlsSection.style.marginTop = '10px';
+        conceptControlsSection.style.padding = '10px';
+        conceptControlsSection.style.backgroundColor = 'var(--background-secondary)';
+        conceptControlsSection.style.borderRadius = '4px';
+
+        // Generate count slider
+        const generateCountRow = conceptControlsSection.createDiv('slider-row');
+        generateCountRow.style.marginBottom = '10px';
+
+        const generateLabel = generateCountRow.createEl('label', {
+            text: `Generate: ${this.plugin.settings.conceptCount} concepts`
+        });
+        generateLabel.style.display = 'block';
+        generateLabel.style.marginBottom = '5px';
+
+        const generateSlider = generateCountRow.createEl('input', {
+            type: 'range'
+        });
+        generateSlider.min = '10';
+        generateSlider.max = '100';
+        generateSlider.step = '5';
+        generateSlider.value = String(this.plugin.settings.conceptCount);
+        generateSlider.style.width = '100%';
+        generateSlider.addEventListener('input', (e) => {
+            const value = parseInt((e.target as HTMLInputElement).value);
+            this.plugin.settings.conceptCount = value;
+            generateLabel.textContent = `Generate: ${value} concepts`;
+            this.plugin.saveSettings();
+        });
+
+        // Display count slider
+        const displayCountRow = conceptControlsSection.createDiv('slider-row');
+
+        const displayLabel = displayCountRow.createEl('label', {
+            text: `Display: ${this.plugin.settings.displayConceptCount} concepts`
+        });
+        displayLabel.style.display = 'block';
+        displayLabel.style.marginBottom = '5px';
+
+        const displaySlider = displayCountRow.createEl('input', {
+            type: 'range'
+        });
+        displaySlider.min = '5';
+        displaySlider.max = '50';
+        displaySlider.step = '1';
+        displaySlider.value = String(this.plugin.settings.displayConceptCount);
+        displaySlider.style.width = '100%';
+        displaySlider.addEventListener('input', (e) => {
+            const value = parseInt((e.target as HTMLInputElement).value);
+            this.plugin.settings.displayConceptCount = value;
+            displayLabel.textContent = `Display: ${value} concepts`;
+            this.plugin.saveSettings();
+
+            // Re-render if we have current monad data
+            if (this.currentMonad && this.currentMonad.concepts) {
+                this.displayConcepts();
+                this.displayNotes();
+                this.draw();
+            }
+        });
+
         // Two-column layout
         const contentLayout = container.createDiv('content-layout');
 
@@ -573,7 +636,7 @@ export class SemanticMonadView extends ItemView {
             const query = Array.from(queryWords || []).join(' ');
             console.log(`🤖 Asking LLM for concepts related to: "${query}"`);
 
-            const llmConcepts = await this.llmService.generateConcepts(query, 30);
+            const llmConcepts = await this.llmService.generateConcepts(query, this.plugin.settings.conceptCount);
             console.log(`📝 LLM returned ${llmConcepts.length} concepts:`, llmConcepts.slice(0, 10));
 
             // Filter out query words to avoid redundancy
@@ -605,9 +668,9 @@ export class SemanticMonadView extends ItemView {
                 };
             });
 
-            // Sort by similarity and take top 25
+            // Sort by similarity and take top N
             rankedConcepts.sort((a, b) => b.similarity - a.similarity);
-            const topConcepts = rankedConcepts.slice(0, 25);
+            const topConcepts = rankedConcepts.slice(0, this.plugin.settings.conceptCount);
 
             console.log('🎯 Top ranked concepts:', topConcepts.slice(0, 5).map(c => `${c.term} (${(c.similarity * 100).toFixed(0)}%)`));
 
@@ -630,8 +693,8 @@ export class SemanticMonadView extends ItemView {
                 };
             });
 
-            // Return top 18 concepts (increased from 12 for richer visualization)
-            const finalConcepts = conceptsWithNotes.slice(0, 18);
+            // Return top N concepts for display
+            const finalConcepts = conceptsWithNotes.slice(0, this.plugin.settings.displayConceptCount);
 
             const withNotes = finalConcepts.filter(c => c.hasNotes).length;
             console.log(`✨ Final: ${finalConcepts.length} concepts (${withNotes} with notes, ${finalConcepts.length - withNotes} pure latent)`);
@@ -1193,7 +1256,10 @@ export class SemanticMonadView extends ItemView {
 
         const conceptItems = this.conceptsList.createEl('div', { cls: 'concept-items' });
 
-        for (const concept of this.currentMonad.concepts) {
+        // Respect the displayConceptCount slider setting
+        const conceptsToShow = this.currentMonad.concepts.slice(0, this.plugin.settings.displayConceptCount);
+
+        for (const concept of conceptsToShow) {
             // Show note indicator if concept has notes
             const noteIndicator = concept.hasNotes ? ` 📝${concept.noteCount}` : '';
             const opacity = concept.hasNotes ? '1.0' : '0.5';

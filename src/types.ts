@@ -53,6 +53,8 @@ export interface SystematicsSettings {
     ollamaEndpoint: string;
     claudeApiKey: string;
     openaiApiKey: string;
+    conceptCount: number; // Number of concepts to generate (5-100)
+    displayConceptCount: number; // Number of concepts to display after filtering
 }
 
 /**

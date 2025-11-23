@@ -12,7 +12,9 @@ const DEFAULT_SETTINGS: SystematicsSettings = {
     ollamaModel: 'llama2',
     ollamaEndpoint: 'http://localhost:11434',
     claudeApiKey: '',
-    openaiApiKey: ''
+    openaiApiKey: '',
+    conceptCount: 50, // Generate 50 concepts by default
+    displayConceptCount: 25 // Display top 25 by default
 };
 
 export default class SystematicsPlugin extends Plugin {
