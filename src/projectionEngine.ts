@@ -31,8 +31,8 @@ export class ProjectionEngine {
         this.umap = new UMAP({
             nComponents: 2,
             nNeighbors,
-            minDist: 0.1,
-            spread: 1.0,
+            minDist: 0.3,      // Increased from 0.1 to spread labels apart
+            spread: 2.0,       // Increased from 1.0 for more spacing
             random: () => Math.random()
         });
     }

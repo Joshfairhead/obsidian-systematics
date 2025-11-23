@@ -52,6 +52,8 @@ export interface ConceptNode {
     embedding: number[];
     similarity: number;      // To monad center
     position2D?: Point2D;
+    hasNotes?: boolean;      // Whether vault has notes for this concept
+    noteCount?: number;      // How many notes reference this concept
 }
 
 export interface IndexStats {

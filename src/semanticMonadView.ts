@@ -2,12 +2,13 @@
  * Semantic Monad View - Embedding-based knowledge exploration
  */
 
-import { ItemView, WorkspaceLeaf, TFile, Notice } from 'obsidian';
+import { ItemView, WorkspaceLeaf, TFile, Notice, Modal } from 'obsidian';
 import SystematicsPlugin from '../main';
 import { EmbeddingService } from './embeddingService';
 import { VectorIndex } from './vectorIndex';
 import { ProjectionEngine } from './projectionEngine';
 import { SemanticMonad, Point2D, ConceptNode, ScoredNote } from './semanticTypes';
+import { LLMService } from './llmService';
 
 export const VIEW_TYPE_SEMANTIC_MONAD = 'systematics-semantic-monad';
 
@@ -16,6 +17,7 @@ export class SemanticMonadView extends ItemView {
     embeddingService: EmbeddingService;
     vectorIndex: VectorIndex;
     projectionEngine: ProjectionEngine;
+    llmService: LLMService | null = null;
 
     // UI Elements
     canvas: HTMLCanvasElement;
@@ -31,6 +33,23 @@ export class SemanticMonadView extends ItemView {
     currentMonad: SemanticMonad | null = null;
     isIndexing: boolean = false;
     conceptPositions: Map<string, Point2D> = new Map();
+    conceptVelocities: Map<string, { vx: number; vy: number }> = new Map();
+    hoveredConcept: string | null = null;
+    animationFrame: number | null = null;
+    animationTime: number = 0;
+
+    // Drag state
+    draggedConcept: string | null = null;
+    dragOffset: { x: number; y: number } = { x: 0, y: 0 };
+    isDragging: boolean = false;
+    mouseDownPos: { x: number; y: number } | null = null;
+
+    // Physics parameters (adjustable via UI)
+    repulsionStrength: number = 0.00090;
+    friction: number = 0.900; // 0 = no friction (free movement), 1 = full friction (no movement)
+    boundaryDistance: number = 0.90; // Maximum distance from center
+    boundarySoftness: number = 1.0; // How much velocity is kept when hitting boundary
+    brownianMotion: number = 0.00002; // Random movement strength
 
     constructor(leaf: WorkspaceLeaf, plugin: SystematicsPlugin) {
         super(leaf);
@@ -45,11 +64,11 @@ export class SemanticMonadView extends ItemView {
     }
 
     getDisplayText(): string {
-        return 'Semantic Monad';
+        return 'Latent Space Explorer';
     }
 
     getIcon(): string {
-        return 'brain-circuit';
+        return 'compass';
     }
 
     async onOpen() {
@@ -71,16 +90,50 @@ export class SemanticMonadView extends ItemView {
         try {
             await this.vectorIndex.initialize();
             // Embedding service initializes lazily on first use
+
+            // Initialize LLM service based on settings
+            this.initializeLLMService();
         } catch (error) {
             new Notice('Failed to initialize semantic search: ' + error.message);
             console.error(error);
         }
     }
 
+    /**
+     * Initialize LLM service from plugin settings
+     */
+    initializeLLMService() {
+        try {
+            const settings = this.plugin.settings;
+            this.llmService = new LLMService(settings.llmProvider, {
+                ollamaEndpoint: settings.ollamaEndpoint,
+                ollamaModel: settings.ollamaModel,
+                claudeApiKey: settings.claudeApiKey,
+                openaiApiKey: settings.openaiApiKey
+            });
+            console.log(`✨ LLM Service initialized with provider: ${settings.llmProvider}`);
+        } catch (error) {
+            console.error('Failed to initialize LLM service:', error);
+            new Notice(`LLM initialization failed: ${error.message}. Check settings.`);
+        }
+    }
+
     createUI(container: Element) {
         // Header
         const header = container.createDiv('semantic-monad-header');
-        header.createEl('h2', { text: 'Semantic Monad Explorer' });
+        const titleRow = header.createDiv('title-row');
+        titleRow.style.display = 'flex';
+        titleRow.style.alignItems = 'baseline';
+        titleRow.style.gap = '10px';
+
+        titleRow.createEl('h2', { text: 'Latent Space Explorer' });
+        const versionEl = titleRow.createEl('span', {
+            text: 'v0.6.0',
+            cls: 'version-badge'
+        });
+        versionEl.style.fontSize = '11px';
+        versionEl.style.color = 'var(--text-muted)';
+        versionEl.style.fontWeight = 'normal';
 
         // Status and controls
         const controlsSection = container.createDiv('controls-section');
@@ -129,6 +182,15 @@ export class SemanticMonadView extends ItemView {
             }
         });
 
+        // Physics settings button
+        const settingsButton = inputRow.createEl('button', { cls: 'clickable-icon' });
+        settingsButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12 1v6m0 6v6m0-15a9 9 0 0 1 9 9m-9-9a9 9 0 0 0-9 9m18 0a9 9 0 0 1-9 9m9-9h-6m-6 0H1m11 9a9 9 0 0 0 9-9"></path></svg>';
+        settingsButton.title = 'Physics Settings';
+        settingsButton.style.marginLeft = '5px';
+        settingsButton.addEventListener('click', () => {
+            new PhysicsSettingsModal(this.app, this).open();
+        });
+
         // Two-column layout
         const contentLayout = container.createDiv('content-layout');
 
@@ -143,8 +205,18 @@ export class SemanticMonadView extends ItemView {
         if (!ctx) throw new Error('Could not get canvas context');
         this.ctx = ctx;
 
-        // Add click handler for canvas
-        this.canvas.addEventListener('click', (e) => this.handleCanvasClick(e));
+        // Add click, hover, and drag handlers for canvas
+        this.canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
+        this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+        this.canvas.addEventListener('mouseup', (e) => this.handleMouseUp(e));
+        this.canvas.addEventListener('mouseleave', () => {
+            this.handleMouseUp(null);
+            this.hoveredConcept = null;
+            this.draw();
+        });
+
+        // Start animation loop
+        this.startAnimation();
 
         // Concepts panel
         const conceptsPanel = leftColumn.createDiv('concepts-panel');
@@ -155,8 +227,7 @@ export class SemanticMonadView extends ItemView {
         const rightColumn = contentLayout.createDiv('right-column');
 
         const notesPanel = rightColumn.createDiv('notes-panel');
-        notesPanel.createEl('h3', { text: 'Semantically Related Notes' });
-        this.notesList = notesPanel.createDiv('notes-list');
+        this.notesList = notesPanel; // Store the entire panel, we'll populate it dynamically
 
         // Initialize canvas
         this.resizeCanvas();
@@ -166,13 +237,20 @@ export class SemanticMonadView extends ItemView {
     resizeCanvas() {
         const parent = this.canvas.parentElement;
         if (parent) {
+            // Match width to parent column (concepts panel below it)
             const parentWidth = parent.clientWidth || 400;
-            const size = Math.min(Math.max(parentWidth - 40, 300), 600);
+
+            // Make canvas square and fill the parent width
+            const size = Math.min(Math.max(parentWidth - 10, 300), 600);
 
             this.canvas.width = size;
             this.canvas.height = size;
-            this.canvas.style.width = size + 'px';
-            this.canvas.style.height = size + 'px';
+
+            // Use CSS to make it fill parent width while maintaining aspect ratio
+            this.canvas.style.width = '100%';
+            this.canvas.style.height = 'auto';
+            this.canvas.style.display = 'block';
+            this.canvas.style.margin = '0 auto';
 
             this.draw();
         }
@@ -373,7 +451,7 @@ export class SemanticMonadView extends ItemView {
             path: file.path,
             mtime: file.stat.mtime,
             tags: [], // Could extract from frontmatter
-            links: []  // Could extract from content
+            links: this.extractWikiLinks(content)
         };
 
         // Store in index
@@ -474,147 +552,114 @@ export class SemanticMonadView extends ItemView {
     }
 
     /**
-     * Extract semantic concepts using global distinctiveness
-     * Two-phase: broad inclusion, narrow discrimination
+     * Extract semantic concepts using LLM-GENERATED discovery
+     * Explores LLM's latent space, then maps to notes
      */
     async extractSemanticConcepts(
         notes: ScoredNote[],
         queryEmbedding: number[],
         queryWords?: Set<string>
     ): Promise<ConceptNode[]> {
-        // PHASE 1: COARSE - Define semantic neighborhood broadly
-        const conceptCandidates: Set<string> = new Set();
+        console.log('🔮 Exploring latent space with LLM...');
 
-        // Extract from top notes (expanded to 40 for broader scope)
-        for (const note of notes.slice(0, 40)) {
-            const file = this.app.vault.getAbstractFileByPath(note.path);
-            if (!(file instanceof TFile)) continue;
-
-            // Add title words
-            const titleWords = this.extractTerms(file.basename);
-            titleWords.forEach(w => conceptCandidates.add(w));
-
-            // Add folder names
-            const pathParts = note.path.split('/');
-            for (const part of pathParts.slice(0, -1)) {
-                const folderWords = this.extractTerms(part);
-                folderWords.forEach(w => conceptCandidates.add(w));
-            }
-
-            // Add content words from substantial notes
-            const content = await this.app.vault.cachedRead(file);
-            if (content.length > 200) {
-                const contentWords = this.extractTerms(content);
-                contentWords.forEach(w => conceptCandidates.add(w));
-            }
-        }
-
-        // PHASE 2: FINE - Calculate global distinctiveness
-        const allRecords = await this.vectorIndex.getAllRecords();
-        const totalDocs = allRecords.length;
-
-        // Build global document frequency map (how many notes contain each term)
-        const globalDF: Map<string, number> = new Map();
-
-        // Sample 500 random notes to estimate global DF (for performance)
-        const sampleSize = Math.min(500, totalDocs);
-        const sampleIndices = new Set<number>();
-        while (sampleIndices.size < sampleSize) {
-            sampleIndices.add(Math.floor(Math.random() * totalDocs));
-        }
-
-        const sampledRecords = Array.from(sampleIndices).map(i => allRecords[i]);
-
-        for (const record of sampledRecords) {
-            const file = this.app.vault.getAbstractFileByPath(record.id);
-            if (!(file instanceof TFile)) continue;
-
-            const titleWords = new Set(this.extractTerms(file.basename));
-            const pathWords = new Set(
-                record.id.split('/').slice(0, -1).flatMap(p => this.extractTerms(p))
-            );
-
-            const allWords = new Set([...titleWords, ...pathWords]);
-
-            for (const word of allWords) {
-                if (conceptCandidates.has(word)) {
-                    globalDF.set(word, (globalDF.get(word) || 0) + 1);
-                }
-            }
-        }
-
-        // Calculate local term frequency in semantic neighborhood
-        const localTF: Map<string, number> = new Map();
-        for (const note of notes.slice(0, 20)) {
-            const file = this.app.vault.getAbstractFileByPath(note.path);
-            if (!(file instanceof TFile)) continue;
-
-            const titleWords = this.extractTerms(file.basename);
-            const pathWords = note.path.split('/').slice(0, -1).flatMap(p => this.extractTerms(p));
-
-            for (const word of [...titleWords, ...pathWords]) {
-                if (conceptCandidates.has(word)) {
-                    localTF.set(word, (localTF.get(word) || 0) + 1);
-                }
-            }
-        }
-
-        // Calculate TF-IDF scores (local TF * global IDF)
-        const tfidfScores: Map<string, number> = new Map();
-        for (const term of conceptCandidates) {
-            // FILTER OUT query words from concepts (avoid redundancy)
-            if (queryWords && queryWords.has(term.toLowerCase())) {
-                continue;
-            }
-
-            const tf = localTF.get(term) || 1;
-            const df = globalDF.get(term) || 1;
-            const idf = Math.log(sampleSize / df);
-
-            // NARROW DISCRIMINATION: Filter out terms with low IDF
-            // If term appears in >30% of sampled notes, it's too generic
-            if (df / sampleSize > 0.3) {
-                continue; // Skip this term
-            }
-
-            tfidfScores.set(term, tf * idf);
-        }
-
-        // Get top candidates by TF-IDF
-        const rankedCandidates = Array.from(tfidfScores.entries())
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 25)
-            .map(([term]) => term);
-
-        if (rankedCandidates.length === 0) {
+        if (!this.llmService) {
+            console.error('LLM service not initialized');
+            new Notice('LLM service not configured. Check plugin settings.');
             return [];
         }
 
-        // Embed and rank by semantic similarity
-        const conceptEmbeddings = await this.embeddingService.embedBatch(rankedCandidates);
+        try {
+            // STEP 1: Ask LLM to generate related concepts
+            const query = Array.from(queryWords || []).join(' ');
+            console.log(`🤖 Asking LLM for concepts related to: "${query}"`);
 
-        const concepts: ConceptNode[] = rankedCandidates.map((term, i) => {
-            const semanticSim = EmbeddingService.cosineSimilarity(
-                queryEmbedding,
-                conceptEmbeddings[i]
-            );
+            const llmConcepts = await this.llmService.generateConcepts(query, 30);
+            console.log(`📝 LLM returned ${llmConcepts.length} concepts:`, llmConcepts.slice(0, 10));
 
-            // Boost by TF-IDF distinctiveness (but cap total at 1.0)
-            const tfidf = tfidfScores.get(term) || 0;
-            const normalizedTFIDF = Math.min(0.15, tfidf * 0.02);
+            // Filter out query words to avoid redundancy
+            const filteredConcepts = llmConcepts.filter(term => {
+                if (!queryWords) return true;
+                return !queryWords.has(term.toLowerCase());
+            });
 
-            // Ensure final similarity is capped at 1.0 (100%)
-            const finalSimilarity = Math.min(1.0, semanticSim + normalizedTFIDF);
+            if (filteredConcepts.length === 0) {
+                console.warn('No concepts after filtering');
+                return [];
+            }
 
-            return {
-                term,
-                embedding: conceptEmbeddings[i],
-                similarity: finalSimilarity
-            };
-        });
+            // STEP 2: Embed LLM-generated concepts
+            console.log('🧬 Embedding LLM concepts...');
+            const conceptEmbeddings = await this.embeddingService.embedBatch(filteredConcepts);
 
-        concepts.sort((a, b) => b.similarity - a.similarity);
-        return concepts.slice(0, 12);
+            // STEP 3: Rank by semantic similarity to query
+            const rankedConcepts = filteredConcepts.map((term, i) => {
+                const similarity = EmbeddingService.cosineSimilarity(
+                    queryEmbedding,
+                    conceptEmbeddings[i]
+                );
+
+                return {
+                    term,
+                    embedding: conceptEmbeddings[i],
+                    similarity
+                };
+            });
+
+            // Sort by similarity and take top 25
+            rankedConcepts.sort((a, b) => b.similarity - a.similarity);
+            const topConcepts = rankedConcepts.slice(0, 25);
+
+            console.log('🎯 Top ranked concepts:', topConcepts.slice(0, 5).map(c => `${c.term} (${(c.similarity * 100).toFixed(0)}%)`));
+
+            // STEP 4: Check which concepts have notes in vault
+            const allRecords = await this.vectorIndex.getAllRecords();
+            const conceptsWithNotes: ConceptNode[] = topConcepts.map(concept => {
+                // Check if any notes relate to this concept
+                const relatedNotes = allRecords.filter(record => {
+                    const title = record.metadata.title.toLowerCase();
+                    const path = record.id.toLowerCase();
+                    const term = concept.term.toLowerCase();
+
+                    return title.includes(term) || path.includes(term);
+                });
+
+                return {
+                    ...concept,
+                    hasNotes: relatedNotes.length > 0,
+                    noteCount: relatedNotes.length
+                };
+            });
+
+            // Return top 18 concepts (increased from 12 for richer visualization)
+            const finalConcepts = conceptsWithNotes.slice(0, 18);
+
+            const withNotes = finalConcepts.filter(c => c.hasNotes).length;
+            console.log(`✨ Final: ${finalConcepts.length} concepts (${withNotes} with notes, ${finalConcepts.length - withNotes} pure latent)`);
+
+            return finalConcepts;
+
+        } catch (error) {
+            console.error('Error generating concepts:', error);
+            new Notice(`Failed to generate concepts: ${error.message}`);
+            return [];
+        }
+    }
+
+    /**
+     * Extract wiki links from markdown content
+     */
+    private extractWikiLinks(content: string): string[] {
+        const linkPattern = /\[\[([^\]]+)\]\]/g;
+        const links: string[] = [];
+        let match;
+
+        while ((match = linkPattern.exec(content)) !== null) {
+            // Extract link text (may include alias like [[Link|Alias]])
+            const linkText = match[1].split('|')[0].trim();
+            links.push(linkText);
+        }
+
+        return [...new Set(links)]; // Remove duplicates
     }
 
     /**
@@ -679,45 +724,293 @@ export class SemanticMonadView extends ItemView {
 
     /**
      * Project embeddings to 2D for visualization
+     * Using force-directed layout with repulsion (like Obsidian graph)
      */
     async projectToVisualization(
         queryEmbedding: number[],
         concepts: ConceptNode[],
         topNotes: ScoredNote[]
     ): Promise<Point2D[]> {
-        // Combine all embeddings
-        const allEmbeddings = [
-            queryEmbedding,
-            ...concepts.map(c => c.embedding)
-        ];
+        const center: Point2D = { x: 0, y: 0, label: 'query' };
+        const others: Point2D[] = [];
 
-        const labels = [
-            'query',
-            ...concepts.map(c => c.term)
-        ];
+        const count = concepts.length;
+        const radius = 0.7; // Base distance from center
 
-        // Project to 2D with query at center
-        const { center, others } = await this.projectionEngine.projectWithCenter(
-            queryEmbedding,
-            concepts.map(c => c.embedding),
-            concepts.map(c => c.term)
-        );
+        // Initialize positions in a circle with some randomness
+        for (let i = 0; i < count; i++) {
+            const angle = (i / count) * 2 * Math.PI + (Math.random() - 0.5) * 0.3;
+            const r = radius + (Math.random() - 0.5) * 0.2;
+            const point: Point2D = {
+                x: Math.cos(angle) * r,
+                y: Math.sin(angle) * r,
+                label: concepts[i].term
+            };
+            others.push(point);
+        }
 
-        // Scale to fit within canvas
-        const scaled = ProjectionEngine.scaleToRadius(others, 0.8);
-
-        // Store positions for click detection
+        // Store positions and initialize velocities
         this.conceptPositions.clear();
-        scaled.forEach((point, i) => {
+        this.conceptVelocities.clear();
+        others.forEach((point, i) => {
             concepts[i].position2D = point;
             this.conceptPositions.set(concepts[i].term, point);
+            this.conceptVelocities.set(concepts[i].term, { vx: 0, vy: 0 });
         });
 
-        return [center, ...scaled];
+        return [center, ...others];
     }
 
     /**
-     * Draw semantic visualization
+     * Apply physics forces to concepts (repulsion + friction)
+     */
+    applyForces() {
+        if (!this.currentMonad) return;
+
+        const concepts = this.currentMonad.concepts;
+
+        // Apply repulsion between all concepts
+        for (let i = 0; i < concepts.length; i++) {
+            const conceptA = concepts[i];
+            if (!conceptA.position2D) continue;
+
+            // Skip physics for dragged concept
+            if (this.isDragging && conceptA.term === this.draggedConcept) {
+                continue;
+            }
+
+            const velA = this.conceptVelocities.get(conceptA.term);
+            if (!velA) continue;
+
+            let fx = 0, fy = 0;
+
+            // Soft repulsion from other concepts (inverse distance, no hard threshold)
+            for (let j = 0; j < concepts.length; j++) {
+                if (i === j) continue;
+                const conceptB = concepts[j];
+                if (!conceptB.position2D) continue;
+
+                const dx = conceptA.position2D.x - conceptB.position2D.x;
+                const dy = conceptA.position2D.y - conceptB.position2D.y;
+                const distSq = dx * dx + dy * dy;
+                const dist = Math.sqrt(distSq);
+
+                if (dist > 0.001) {  // Avoid division by zero
+                    // Smooth inverse distance repulsion (gentle falloff, no hard boundary)
+                    const force = this.repulsionStrength / (distSq + 0.1);
+                    fx += (dx / dist) * force;
+                    fy += (dy / dist) * force;
+                }
+            }
+
+            // Add Brownian motion (random thermal movement)
+            fx += (Math.random() - 0.5) * this.brownianMotion;
+            fy += (Math.random() - 0.5) * this.brownianMotion;
+
+            // Update velocity with force and friction
+            // Friction: 0 = no friction (free movement), 1 = full friction (no movement)
+            velA.vx = (velA.vx + fx) * (1 - this.friction);
+            velA.vy = (velA.vy + fy) * (1 - this.friction);
+
+            // Update position
+            conceptA.position2D.x += velA.vx;
+            conceptA.position2D.y += velA.vy;
+
+            // Boundary constraint: clamp within circle
+            const newDist = Math.sqrt(
+                conceptA.position2D.x ** 2 + conceptA.position2D.y ** 2
+            );
+            if (newDist > this.boundaryDistance) {
+                // Clamp to boundary
+                const scale = this.boundaryDistance / newDist;
+                conceptA.position2D.x *= scale;
+                conceptA.position2D.y *= scale;
+                // Reduce velocity when hitting boundary
+                velA.vx *= this.boundarySoftness;
+                velA.vy *= this.boundarySoftness;
+            }
+
+            // Update stored position
+            this.conceptPositions.set(conceptA.term, conceptA.position2D);
+        }
+    }
+
+    /**
+     * Start animation loop with physics simulation
+     */
+    startAnimation() {
+        const animate = () => {
+            this.animationTime += 0.01;
+            this.applyForces(); // Update physics
+            this.draw();
+            this.animationFrame = requestAnimationFrame(animate);
+        };
+        animate();
+    }
+
+    /**
+     * Stop animation loop
+     */
+    stopAnimation() {
+        if (this.animationFrame !== null) {
+            cancelAnimationFrame(this.animationFrame);
+            this.animationFrame = null;
+        }
+    }
+
+    /**
+     * Handle mouse down - prepare for dragging or clicking
+     */
+    handleMouseDown(e: MouseEvent) {
+        if (!this.currentMonad) return;
+
+        const rect = this.canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        // Store mouse down position to detect click vs drag
+        this.mouseDownPos = { x, y };
+
+        const centerX = this.canvas.width / 2;
+        const centerY = this.canvas.height / 2;
+        const radius = Math.min(this.canvas.width, this.canvas.height) / 3;
+
+        // Check if clicked near any concept
+        for (const concept of this.currentMonad.concepts) {
+            if (!concept.position2D) continue;
+
+            const pos = ProjectionEngine.toCanvasCoords(
+                concept.position2D,
+                centerX,
+                centerY,
+                radius * 0.9
+            );
+
+            const dist = Math.sqrt((x - pos.x) ** 2 + (y - pos.y) ** 2);
+
+            if (dist < 20) {
+                // Prepare for dragging this concept
+                this.draggedConcept = concept.term;
+                this.dragOffset = {
+                    x: pos.x - x,
+                    y: pos.y - y
+                };
+                this.canvas.style.cursor = 'grabbing';
+                return;
+            }
+        }
+    }
+
+    /**
+     * Handle mouse move - update drag position and hover state
+     */
+    handleMouseMove(e: MouseEvent) {
+        if (!this.currentMonad) return;
+
+        const rect = this.canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        const centerX = this.canvas.width / 2;
+        const centerY = this.canvas.height / 2;
+        const radius = Math.min(this.canvas.width, this.canvas.height) / 3;
+
+        // Check if we should start dragging (mouse moved with concept selected)
+        if (this.draggedConcept && !this.isDragging && this.mouseDownPos) {
+            const dx = x - this.mouseDownPos.x;
+            const dy = y - this.mouseDownPos.y;
+            const moveDist = Math.sqrt(dx * dx + dy * dy);
+
+            // Start dragging if moved more than 3 pixels
+            if (moveDist > 3) {
+                this.isDragging = true;
+                // Zero out velocity when starting drag
+                const vel = this.conceptVelocities.get(this.draggedConcept);
+                if (vel) {
+                    vel.vx = 0;
+                    vel.vy = 0;
+                }
+            }
+        }
+
+        // Handle dragging
+        if (this.isDragging && this.draggedConcept) {
+            const concept = this.currentMonad.concepts.find(c => c.term === this.draggedConcept);
+            if (concept && concept.position2D) {
+                // Convert mouse position to normalized coordinates
+                const canvasX = x + this.dragOffset.x;
+                const canvasY = y + this.dragOffset.y;
+
+                // Convert from canvas coords to normalized coords
+                const normX = (canvasX - centerX) / (radius * 0.9);
+                const normY = (canvasY - centerY) / (radius * 0.9);
+
+                // Clamp to circle boundary
+                const dist = Math.sqrt(normX * normX + normY * normY);
+                if (dist > 0.85) {
+                    const scale = 0.85 / dist;
+                    concept.position2D.x = normX * scale;
+                    concept.position2D.y = normY * scale;
+                } else {
+                    concept.position2D.x = normX;
+                    concept.position2D.y = normY;
+                }
+
+                this.conceptPositions.set(concept.term, concept.position2D);
+            }
+            return;
+        }
+
+        // Handle hover (when not dragging)
+        let foundHover = false;
+        for (const concept of this.currentMonad.concepts) {
+            if (!concept.position2D) continue;
+
+            const pos = ProjectionEngine.toCanvasCoords(
+                concept.position2D,
+                centerX,
+                centerY,
+                radius * 0.9
+            );
+
+            const dist = Math.sqrt((x - pos.x) ** 2 + (y - pos.y) ** 2);
+
+            if (dist < 20) {
+                if (this.hoveredConcept !== concept.term) {
+                    this.hoveredConcept = concept.term;
+                    this.canvas.style.cursor = 'grab';
+                }
+                foundHover = true;
+                break;
+            }
+        }
+
+        if (!foundHover && this.hoveredConcept !== null) {
+            this.hoveredConcept = null;
+            this.canvas.style.cursor = 'default';
+        }
+    }
+
+    /**
+     * Handle mouse up - stop dragging or handle click
+     */
+    handleMouseUp(e: MouseEvent | null) {
+        // If we have a dragged concept but never started dragging (no movement), treat as click
+        if (this.draggedConcept && !this.isDragging) {
+            // Navigate to this concept
+            this.searchInput.value = this.draggedConcept;
+            this.handleSemanticSearch();
+        }
+
+        // Clean up drag state
+        this.isDragging = false;
+        this.draggedConcept = null;
+        this.mouseDownPos = null;
+        this.canvas.style.cursor = this.hoveredConcept ? 'grab' : 'default';
+    }
+
+    /**
+     * Draw semantic visualization with animation and hover effects
      */
     draw() {
         const width = this.canvas.width;
@@ -764,61 +1057,51 @@ export class SemanticMonadView extends ItemView {
         for (const concept of this.currentMonad.concepts) {
             if (!concept.position2D) continue;
 
+            // Use physics-updated position (no artificial drift needed)
             const pos = ProjectionEngine.toCanvasCoords(
                 concept.position2D,
                 centerX,
                 centerY,
-                radius * 0.85
+                radius * 0.9
             );
+
+            // Check if this concept is hovered
+            const isHovered = this.hoveredConcept === concept.term;
+
+            // Visual distinction: opacity based on whether concept has notes
+            const baseOpacity = concept.hasNotes ? 1.0 : 0.4;
+            const opacity = isHovered ? 1.0 : baseOpacity;
 
             // Draw concept dot (color by similarity)
             const intensity = Math.floor(concept.similarity * 200 + 55);
+            this.ctx.globalAlpha = opacity;
+
+            // Glow effect on hover
+            if (isHovered) {
+                this.ctx.shadowBlur = 15;
+                this.ctx.shadowColor = `rgb(${intensity}, 100, ${255 - intensity})`;
+            }
+
             this.ctx.fillStyle = `rgb(${intensity}, 100, ${255 - intensity})`;
             this.ctx.beginPath();
-            this.ctx.arc(pos.x, pos.y, 4, 0, 2 * Math.PI);
+            const dotSize = isHovered ? 7 : 4;  // Larger on hover
+            this.ctx.arc(pos.x, pos.y, dotSize, 0, 2 * Math.PI);
             this.ctx.fill();
 
-            // Draw concept label
+            // Reset shadow
+            this.ctx.shadowBlur = 0;
+
+            // Draw concept label (larger and bold on hover)
             this.ctx.fillStyle = textColor;
-            this.ctx.fillText(concept.term, pos.x, pos.y - 10);
+            this.ctx.font = isHovered ? 'bold 12px sans-serif' : '11px sans-serif';
+            this.ctx.fillText(concept.term, pos.x, pos.y - 12);
+
+            // Reset alpha and font
+            this.ctx.globalAlpha = 1.0;
+            this.ctx.font = '11px sans-serif';
         }
     }
 
-    /**
-     * Handle click on canvas (for concept navigation)
-     */
-    handleCanvasClick(e: MouseEvent) {
-        if (!this.currentMonad) return;
-
-        const rect = this.canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-
-        const centerX = this.canvas.width / 2;
-        const centerY = this.canvas.height / 2;
-        const radius = Math.min(this.canvas.width, this.canvas.height) / 3;
-
-        // Check if clicked near any concept
-        for (const concept of this.currentMonad.concepts) {
-            if (!concept.position2D) continue;
-
-            const pos = ProjectionEngine.toCanvasCoords(
-                concept.position2D,
-                centerX,
-                centerY,
-                radius * 0.85
-            );
-
-            const dist = Math.sqrt((x - pos.x) ** 2 + (y - pos.y) ** 2);
-
-            if (dist < 15) {  // Click threshold
-                // Navigate to this concept
-                this.searchInput.value = concept.term;
-                this.handleSemanticSearch();
-                break;
-            }
-        }
-    }
 
     displayNotes() {
         this.notesList.empty();
@@ -828,7 +1111,54 @@ export class SemanticMonadView extends ItemView {
             return;
         }
 
-        const noteItems = this.notesList.createEl('ul', { cls: 'note-items' });
+        // Find the top match (likely the direct match if query matched a title)
+        const topMatch = this.currentMonad.notes[0];
+        const topFile = this.app.vault.getAbstractFileByPath(topMatch.path);
+
+        // If top match has links, show them separately
+        if (topFile instanceof TFile && topMatch.metadata.links.length > 0) {
+            const linkedSection = this.notesList.createDiv('linked-notes-section');
+            linkedSection.createEl('h3', { text: 'Linked Notes' });
+            linkedSection.createEl('p', {
+                text: `From: ${topFile.basename}`,
+                cls: 'section-subtitle'
+            });
+
+            const linkedItems = linkedSection.createEl('ul', { cls: 'note-items' });
+
+            for (const linkTitle of topMatch.metadata.links) {
+                // Try to find the linked note in our results
+                const linkedNote = this.currentMonad.notes.find(n =>
+                    n.metadata.title.toLowerCase() === linkTitle.toLowerCase()
+                );
+
+                const item = linkedItems.createEl('li', { cls: 'note-item linked-note' });
+
+                const link = item.createEl('a', {
+                    text: linkTitle,
+                    cls: 'note-link'
+                });
+
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    // Try to open the linked note
+                    this.app.workspace.openLinkText(linkTitle, topMatch.path, false);
+                });
+
+                if (linkedNote) {
+                    const score = item.createEl('span', {
+                        text: `${(linkedNote.score * 100).toFixed(0)}%`,
+                        cls: 'relevance-score'
+                    });
+                }
+            }
+        }
+
+        // Show all notes by semantic similarity
+        const semanticSection = this.notesList.createDiv('semantic-notes-section');
+        semanticSection.createEl('h3', { text: 'Semantically Related Notes' });
+
+        const noteItems = semanticSection.createEl('ul', { cls: 'note-items' });
 
         for (const note of this.currentMonad.notes) {
             const file = this.app.vault.getAbstractFileByPath(note.path);
@@ -864,15 +1194,87 @@ export class SemanticMonadView extends ItemView {
         const conceptItems = this.conceptsList.createEl('div', { cls: 'concept-items' });
 
         for (const concept of this.currentMonad.concepts) {
+            // Show note indicator if concept has notes
+            const noteIndicator = concept.hasNotes ? ` 📝${concept.noteCount}` : '';
+            const opacity = concept.hasNotes ? '1.0' : '0.5';
+
             const tag = conceptItems.createEl('span', {
-                text: `${concept.term} (${(concept.similarity * 100).toFixed(0)}%)`,
+                text: `${concept.term} (${(concept.similarity * 100).toFixed(0)}%)${noteIndicator}`,
                 cls: 'concept-tag clickable'
             });
 
+            tag.style.opacity = opacity;
+
             tag.addEventListener('click', () => {
-                this.searchInput.value = concept.term;
-                this.handleSemanticSearch();
+                // If concept has notes, show those specific notes
+                if (concept.hasNotes) {
+                    this.showNotesForConcept(concept.term);
+                } else {
+                    // Otherwise, search for the concept in latent space
+                    this.searchInput.value = concept.term;
+                    this.handleSemanticSearch();
+                }
             });
+        }
+    }
+
+    /**
+     * Show only notes that match a specific concept
+     */
+    async showNotesForConcept(conceptTerm: string) {
+        if (!this.currentMonad) return;
+
+        const allRecords = await this.vectorIndex.getAllRecords();
+
+        // Find notes that contain this concept in title or path
+        const matchingNotes = allRecords.filter(record => {
+            const title = record.metadata.title.toLowerCase();
+            const path = record.id.toLowerCase();
+            const term = conceptTerm.toLowerCase();
+
+            return title.includes(term) || path.includes(term);
+        });
+
+        if (matchingNotes.length === 0) {
+            new Notice(`No notes found for concept: ${conceptTerm}`);
+            return;
+        }
+
+        // Clear and show only matching notes
+        this.notesList.empty();
+
+        const section = this.notesList.createDiv('concept-notes-section');
+        section.createEl('h3', { text: `Notes for: ${conceptTerm}` });
+        section.createEl('p', {
+            text: `${matchingNotes.length} note(s) found`,
+            cls: 'section-subtitle'
+        });
+
+        const noteItems = section.createEl('ul', { cls: 'note-items' });
+
+        for (const record of matchingNotes) {
+            const file = this.app.vault.getAbstractFileByPath(record.id);
+            if (!(file instanceof TFile)) continue;
+
+            const item = noteItems.createEl('li', { cls: 'note-item' });
+
+            const link = item.createEl('a', {
+                text: file.basename,
+                cls: 'note-link'
+            });
+
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.app.workspace.openLinkText(file.path, '', false);
+            });
+
+            // Show path for context
+            const pathSpan = item.createEl('span', {
+                text: ` - ${record.id}`,
+                cls: 'note-path'
+            });
+            pathSpan.style.fontSize = '11px';
+            pathSpan.style.color = 'var(--text-muted)';
         }
     }
 
@@ -925,6 +1327,253 @@ export class SemanticMonadView extends ItemView {
     }
 
     async onClose() {
+        this.stopAnimation();
         this.vectorIndex.close();
+    }
+}
+
+/**
+ * Physics Settings Modal
+ */
+class PhysicsSettingsModal extends Modal {
+    view: SemanticMonadView;
+    isDragging: boolean = false;
+    dragOffset: { x: number; y: number } = { x: 0, y: 0 };
+    draggableEl: HTMLElement | null = null;
+
+    // Bound methods for event cleanup
+    boundHandleDrag: ((e: MouseEvent) => void) | null = null;
+    boundHandleDragEnd: (() => void) | null = null;
+
+    constructor(app: any, view: SemanticMonadView) {
+        super(app);
+        this.view = view;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.empty();
+
+        // Style the modal to be smaller and positioned on the right
+        this.draggableEl = contentEl.closest('.modal') as HTMLElement;
+        if (this.draggableEl) {
+            this.draggableEl.style.width = '320px';
+            this.draggableEl.style.maxWidth = '320px';
+            this.draggableEl.style.position = 'fixed';
+            this.draggableEl.style.right = '20px';
+            this.draggableEl.style.left = 'auto';
+            this.draggableEl.style.top = '80px';
+            this.draggableEl.style.transform = 'none';
+        }
+
+        const header = contentEl.createEl('h3', { text: 'Physics Settings' });
+        header.style.cursor = 'move';
+        header.style.userSelect = 'none';
+
+        // Make header draggable
+        header.addEventListener('mousedown', (e) => this.handleDragStart(e));
+
+        // Create controls container
+        const controls = contentEl.createDiv();
+        controls.style.display = 'flex';
+        controls.style.flexDirection = 'column';
+        controls.style.gap = '12px';
+        controls.style.padding = '5px 0';
+
+        // Repulsion strength
+        this.createSlider(
+            controls,
+            'Repulsion Strength',
+            'How strongly nodes push each other away',
+            this.view.repulsionStrength,
+            0,
+            0.001,
+            0.00001,
+            5,
+            (value) => {
+                this.view.repulsionStrength = value;
+            }
+        );
+
+        // Friction
+        this.createSlider(
+            controls,
+            'Friction',
+            '0 = smooth movement, 1 = sticky/static',
+            this.view.friction,
+            0,
+            1,
+            0.001,
+            3,
+            (value) => {
+                this.view.friction = value;
+            }
+        );
+
+        // Boundary distance
+        this.createSlider(
+            controls,
+            'Boundary Distance',
+            'How far nodes can be from center',
+            this.view.boundaryDistance,
+            0.5,
+            1.0,
+            0.01,
+            2,
+            (value) => {
+                this.view.boundaryDistance = value;
+            }
+        );
+
+        // Boundary softness
+        this.createSlider(
+            controls,
+            'Boundary Softness',
+            'How bouncy the boundary is (0 = hard wall, 1 = soft)',
+            this.view.boundarySoftness,
+            0,
+            1,
+            0.05,
+            2,
+            (value) => {
+                this.view.boundarySoftness = value;
+            }
+        );
+
+        // Brownian motion
+        this.createSlider(
+            controls,
+            'Brownian Motion',
+            'Random thermal movement (0 = none, higher = more jitter)',
+            this.view.brownianMotion,
+            0,
+            0.0001,
+            0.000001,
+            6,
+            (value) => {
+                this.view.brownianMotion = value;
+            }
+        );
+
+        // Reset button
+        const buttonRow = contentEl.createDiv();
+        buttonRow.style.marginTop = '15px';
+        buttonRow.style.display = 'flex';
+        buttonRow.style.gap = '8px';
+
+        const resetButton = buttonRow.createEl('button', { text: 'Reset' });
+        resetButton.style.flex = '1';
+        resetButton.addEventListener('click', () => {
+            this.view.repulsionStrength = 0.00090;
+            this.view.friction = 0.900;
+            this.view.boundaryDistance = 0.90;
+            this.view.boundarySoftness = 1.0;
+            this.view.brownianMotion = 0.00002;
+            this.close();
+            new PhysicsSettingsModal(this.app, this.view).open();
+        });
+
+        const closeButton = buttonRow.createEl('button', { text: 'Close' });
+        closeButton.style.flex = '1';
+        closeButton.addEventListener('click', () => this.close());
+    }
+
+    createSlider(
+        container: HTMLElement,
+        label: string,
+        description: string,
+        initialValue: number,
+        min: number,
+        max: number,
+        step: number,
+        decimals: number,
+        onChange: (value: number) => void
+    ) {
+        const controlDiv = container.createDiv();
+        controlDiv.style.display = 'flex';
+        controlDiv.style.flexDirection = 'column';
+        controlDiv.style.gap = '5px';
+
+        const labelRow = controlDiv.createDiv();
+        labelRow.style.display = 'flex';
+        labelRow.style.justifyContent = 'space-between';
+        labelRow.style.alignItems = 'center';
+
+        const labelEl = labelRow.createEl('label', { text: label });
+        labelEl.style.fontWeight = '500';
+        labelEl.style.fontSize = '13px';
+
+        const valueEl = labelRow.createEl('span', { text: initialValue.toFixed(decimals) });
+        valueEl.style.color = 'var(--text-muted)';
+        valueEl.style.fontSize = '11px';
+        valueEl.style.fontFamily = 'monospace';
+
+        const descEl = controlDiv.createEl('div', { text: description });
+        descEl.style.fontSize = '10px';
+        descEl.style.color = 'var(--text-muted)';
+        descEl.style.marginBottom = '3px';
+
+        const slider = controlDiv.createEl('input', { type: 'range' });
+        slider.min = min.toString();
+        slider.max = max.toString();
+        slider.step = step.toString();
+        slider.value = initialValue.toString();
+        slider.style.width = '100%';
+
+        slider.addEventListener('input', (e) => {
+            const value = parseFloat((e.target as HTMLInputElement).value);
+            valueEl.textContent = value.toFixed(decimals);
+            onChange(value);
+        });
+    }
+
+    handleDragStart(e: MouseEvent) {
+        if (!this.draggableEl) return;
+
+        this.isDragging = true;
+        const rect = this.draggableEl.getBoundingClientRect();
+        this.dragOffset = {
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top
+        };
+        e.preventDefault();
+
+        // Bind event handlers
+        this.boundHandleDrag = (e: MouseEvent) => this.handleDrag(e);
+        this.boundHandleDragEnd = () => this.handleDragEnd();
+
+        document.addEventListener('mousemove', this.boundHandleDrag);
+        document.addEventListener('mouseup', this.boundHandleDragEnd);
+    }
+
+    handleDrag(e: MouseEvent) {
+        if (!this.isDragging || !this.draggableEl) return;
+
+        const x = e.clientX - this.dragOffset.x;
+        const y = e.clientY - this.dragOffset.y;
+
+        // Allow dragging anywhere, including off-screen
+        this.draggableEl.style.left = x + 'px';
+        this.draggableEl.style.top = y + 'px';
+        this.draggableEl.style.right = 'auto';
+    }
+
+    handleDragEnd() {
+        this.isDragging = false;
+
+        // Clean up event listeners
+        if (this.boundHandleDrag) {
+            document.removeEventListener('mousemove', this.boundHandleDrag);
+            this.boundHandleDrag = null;
+        }
+        if (this.boundHandleDragEnd) {
+            document.removeEventListener('mouseup', this.boundHandleDragEnd);
+            this.boundHandleDragEnd = null;
+        }
+    }
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
     }
 }
