@@ -44,6 +44,9 @@ export class SemanticMonadView extends ItemView {
     isDragging: boolean = false;
     mouseDownPos: { x: number; y: number } | null = null;
 
+    // Dyad selection state (for K2 pairing)
+    selectedConcepts: string[] = []; // Array of up to 2 concept terms for dyad
+
     // Physics parameters (adjustable via UI)
     repulsionStrength: number = 0.00090;
     friction: number = 0.900; // 0 = no friction (free movement), 1 = full friction (no movement)
@@ -535,6 +538,9 @@ export class SemanticMonadView extends ItemView {
             new Notice('Please enter a search query');
             return;
         }
+
+        // Reset dyad selection for new monad
+        this.selectedConcepts = [];
 
         try {
             new Notice('Searching semantic space...');
@@ -1120,6 +1126,36 @@ export class SemanticMonadView extends ItemView {
         this.ctx.textAlign = 'center';
         this.ctx.fillText(this.currentMonad.query, centerX, centerY + 25);
 
+        // Draw dyad connection line if 2 concepts are selected
+        if (this.selectedConcepts.length === 2) {
+            const concept1 = this.currentMonad.concepts.find(c => c.term === this.selectedConcepts[0]);
+            const concept2 = this.currentMonad.concepts.find(c => c.term === this.selectedConcepts[1]);
+
+            if (concept1?.position2D && concept2?.position2D) {
+                const pos1 = ProjectionEngine.toCanvasCoords(concept1.position2D, centerX, centerY, radius * 0.9);
+                const pos2 = ProjectionEngine.toCanvasCoords(concept2.position2D, centerX, centerY, radius * 0.9);
+
+                // Draw thick line connecting the dyad poles
+                this.ctx.strokeStyle = 'var(--interactive-accent)';
+                this.ctx.lineWidth = 3;
+                this.ctx.setLineDash([5, 5]);
+                this.ctx.beginPath();
+                this.ctx.moveTo(pos1.x, pos1.y);
+                this.ctx.lineTo(pos2.x, pos2.y);
+                this.ctx.stroke();
+                this.ctx.setLineDash([]);
+                this.ctx.lineWidth = 2;
+
+                // Draw dyad label at midpoint
+                const midX = (pos1.x + pos2.x) / 2;
+                const midY = (pos1.y + pos2.y) / 2;
+                this.ctx.fillStyle = textColor;
+                this.ctx.font = 'bold 12px sans-serif';
+                this.ctx.textAlign = 'center';
+                this.ctx.fillText('Dyad (K2)', midX, midY - 5);
+            }
+        }
+
         // Draw concepts at their projected 2D positions
         this.ctx.font = '11px sans-serif';
 
@@ -1134,35 +1170,40 @@ export class SemanticMonadView extends ItemView {
                 radius * 0.9
             );
 
-            // Check if this concept is hovered
+            // Check if this concept is hovered or selected
             const isHovered = this.hoveredConcept === concept.term;
+            const isSelected = this.selectedConcepts.includes(concept.term);
 
             // Visual distinction: opacity based on whether concept has notes
             const baseOpacity = concept.hasNotes ? 1.0 : 0.4;
-            const opacity = isHovered ? 1.0 : baseOpacity;
+            const opacity = (isHovered || isSelected) ? 1.0 : baseOpacity;
 
-            // Draw concept dot (color by similarity)
+            // Draw concept dot (color by similarity, highlight if selected)
             const intensity = Math.floor(concept.similarity * 200 + 55);
             this.ctx.globalAlpha = opacity;
 
-            // Glow effect on hover
-            if (isHovered) {
+            // Glow effect on hover or selection
+            if (isHovered || isSelected) {
                 this.ctx.shadowBlur = 15;
-                this.ctx.shadowColor = `rgb(${intensity}, 100, ${255 - intensity})`;
+                this.ctx.shadowColor = isSelected
+                    ? 'var(--interactive-accent)'
+                    : `rgb(${intensity}, 100, ${255 - intensity})`;
             }
 
-            this.ctx.fillStyle = `rgb(${intensity}, 100, ${255 - intensity})`;
+            this.ctx.fillStyle = isSelected
+                ? 'var(--interactive-accent)'
+                : `rgb(${intensity}, 100, ${255 - intensity})`;
             this.ctx.beginPath();
-            const dotSize = isHovered ? 7 : 4;  // Larger on hover
+            const dotSize = (isHovered || isSelected) ? 8 : 4;  // Larger if hovered/selected
             this.ctx.arc(pos.x, pos.y, dotSize, 0, 2 * Math.PI);
             this.ctx.fill();
 
             // Reset shadow
             this.ctx.shadowBlur = 0;
 
-            // Draw concept label (larger and bold on hover)
+            // Draw concept label (larger and bold on hover/selection)
             this.ctx.fillStyle = textColor;
-            this.ctx.font = isHovered ? 'bold 12px sans-serif' : '11px sans-serif';
+            this.ctx.font = (isHovered || isSelected) ? 'bold 12px sans-serif' : '11px sans-serif';
             this.ctx.fillText(concept.term, pos.x, pos.y - 12);
 
             // Reset alpha and font
@@ -1268,6 +1309,7 @@ export class SemanticMonadView extends ItemView {
         for (const concept of conceptsToShow) {
             // Show note indicator if concept has notes
             const noteIndicator = concept.hasNotes ? ` 📝${concept.noteCount}` : '';
+            const isSelected = this.selectedConcepts.includes(concept.term);
             const opacity = concept.hasNotes ? '1.0' : '0.5';
 
             const tag = conceptItems.createEl('span', {
@@ -1277,17 +1319,48 @@ export class SemanticMonadView extends ItemView {
 
             tag.style.opacity = opacity;
 
+            // Visual indication of selection for dyad pairing
+            if (isSelected) {
+                tag.style.backgroundColor = 'var(--interactive-accent)';
+                tag.style.color = 'var(--text-on-accent)';
+                tag.style.fontWeight = 'bold';
+            }
+
             tag.addEventListener('click', () => {
-                // If concept has notes, show those specific notes
-                if (concept.hasNotes) {
-                    this.showNotesForConcept(concept.term);
-                } else {
-                    // Otherwise, search for the concept in latent space
-                    this.searchInput.value = concept.term;
-                    this.handleSemanticSearch();
-                }
+                this.toggleConceptSelection(concept.term);
             });
         }
+    }
+
+    /**
+     * Toggle concept selection for dyad pairing (K2)
+     * Maximum of 2 concepts can be selected at once
+     */
+    toggleConceptSelection(conceptTerm: string) {
+        const index = this.selectedConcepts.indexOf(conceptTerm);
+
+        if (index >= 0) {
+            // Deselect if already selected
+            this.selectedConcepts.splice(index, 1);
+            new Notice(`Deselected: ${conceptTerm}`);
+        } else {
+            // Select concept
+            if (this.selectedConcepts.length >= 2) {
+                // Replace oldest selection if already have 2
+                this.selectedConcepts.shift();
+            }
+            this.selectedConcepts.push(conceptTerm);
+            new Notice(`Selected: ${conceptTerm} (${this.selectedConcepts.length}/2 for dyad)`);
+        }
+
+        // Show dyad visualization if 2 concepts selected
+        if (this.selectedConcepts.length === 2) {
+            new Notice(`Dyad formed: ${this.selectedConcepts[0]} <> ${this.selectedConcepts[1]}`);
+        }
+
+        // Refresh display
+        this.displayConcepts();
+        this.draw();
     }
 
     /**
