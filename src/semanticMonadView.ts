@@ -127,7 +127,7 @@ export class SemanticMonadView extends ItemView {
 
         titleRow.createEl('h2', { text: 'Latent Space Explorer' });
         const versionEl = titleRow.createEl('span', {
-            text: 'v0.5.4',
+            text: 'v0.5.5',
             cls: 'version-badge'
         });
         versionEl.style.fontSize = '11px';
@@ -1522,12 +1522,9 @@ class PhysicsSettingsModal extends Modal {
         const x = e.clientX - this.dragOffset.x;
         const y = e.clientY - this.dragOffset.y;
 
-        // Keep modal within viewport
-        const maxX = window.innerWidth - this.draggableEl.offsetWidth;
-        const maxY = window.innerHeight - this.draggableEl.offsetHeight;
-
-        this.draggableEl.style.left = Math.max(0, Math.min(x, maxX)) + 'px';
-        this.draggableEl.style.top = Math.max(0, Math.min(y, maxY)) + 'px';
+        // Allow dragging anywhere, including off-screen
+        this.draggableEl.style.left = x + 'px';
+        this.draggableEl.style.top = y + 'px';
         this.draggableEl.style.right = 'auto';
     }
 
