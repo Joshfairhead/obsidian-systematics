@@ -127,7 +127,7 @@ export class SemanticMonadView extends ItemView {
 
         titleRow.createEl('h2', { text: 'Latent Space Explorer' });
         const versionEl = titleRow.createEl('span', {
-            text: 'v0.5.3',
+            text: 'v0.5.4',
             cls: 'version-badge'
         });
         versionEl.style.fontSize = '11px';
@@ -1334,7 +1334,7 @@ class PhysicsSettingsModal extends Modal {
     view: SemanticMonadView;
     isDragging: boolean = false;
     dragOffset: { x: number; y: number } = { x: 0, y: 0 };
-    modalEl: HTMLElement | null = null;
+    draggableEl: HTMLElement | null = null;
 
     constructor(app: any, view: SemanticMonadView) {
         super(app);
@@ -1346,15 +1346,15 @@ class PhysicsSettingsModal extends Modal {
         contentEl.empty();
 
         // Style the modal to be smaller and positioned on the right
-        this.modalEl = contentEl.closest('.modal') as HTMLElement;
-        if (this.modalEl) {
-            this.modalEl.style.width = '320px';
-            this.modalEl.style.maxWidth = '320px';
-            this.modalEl.style.position = 'fixed';
-            this.modalEl.style.right = '20px';
-            this.modalEl.style.left = 'auto';
-            this.modalEl.style.top = '80px';
-            this.modalEl.style.transform = 'none';
+        this.draggableEl = contentEl.closest('.modal') as HTMLElement;
+        if (this.draggableEl) {
+            this.draggableEl.style.width = '320px';
+            this.draggableEl.style.maxWidth = '320px';
+            this.draggableEl.style.position = 'fixed';
+            this.draggableEl.style.right = '20px';
+            this.draggableEl.style.left = 'auto';
+            this.draggableEl.style.top = '80px';
+            this.draggableEl.style.transform = 'none';
         }
 
         const header = contentEl.createEl('h3', { text: 'Physics Settings' });
@@ -1505,10 +1505,10 @@ class PhysicsSettingsModal extends Modal {
     }
 
     handleDragStart(e: MouseEvent) {
-        if (!this.modalEl) return;
+        if (!this.draggableEl) return;
 
         this.isDragging = true;
-        const rect = this.modalEl.getBoundingClientRect();
+        const rect = this.draggableEl.getBoundingClientRect();
         this.dragOffset = {
             x: e.clientX - rect.left,
             y: e.clientY - rect.top
@@ -1517,18 +1517,18 @@ class PhysicsSettingsModal extends Modal {
     }
 
     handleDrag(e: MouseEvent) {
-        if (!this.isDragging || !this.modalEl) return;
+        if (!this.isDragging || !this.draggableEl) return;
 
         const x = e.clientX - this.dragOffset.x;
         const y = e.clientY - this.dragOffset.y;
 
         // Keep modal within viewport
-        const maxX = window.innerWidth - this.modalEl.offsetWidth;
-        const maxY = window.innerHeight - this.modalEl.offsetHeight;
+        const maxX = window.innerWidth - this.draggableEl.offsetWidth;
+        const maxY = window.innerHeight - this.draggableEl.offsetHeight;
 
-        this.modalEl.style.left = Math.max(0, Math.min(x, maxX)) + 'px';
-        this.modalEl.style.top = Math.max(0, Math.min(y, maxY)) + 'px';
-        this.modalEl.style.right = 'auto';
+        this.draggableEl.style.left = Math.max(0, Math.min(x, maxX)) + 'px';
+        this.draggableEl.style.top = Math.max(0, Math.min(y, maxY)) + 'px';
+        this.draggableEl.style.right = 'auto';
     }
 
     handleDragEnd() {
