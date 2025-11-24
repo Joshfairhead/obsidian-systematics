@@ -8,6 +8,65 @@ export interface LLMProvider {
 }
 
 /**
+ * Validates a concept term against quality criteria
+ * Returns true if concept passes all validation checks
+ */
+function validateConcept(term: string, queryTerm: string): boolean {
+    // 1. Length check: 3-20 chars (tighten upper bound)
+    if (term.length < 3 || term.length > 20) {
+        return false;
+    }
+
+    // 2. Hyphen count: Max 1 hyphen (reject "object-oriented-programming")
+    const hyphenCount = (term.match(/-/g) || []).length;
+    if (hyphenCount > 1) {
+        return false;
+    }
+
+    // 3. Query echo detection: Reject if term is substring of query or vice versa
+    const termNormalized = term.replace(/-/g, '').toLowerCase();
+    const queryNormalized = queryTerm.replace(/[^a-z]/g, '').toLowerCase();
+    if (termNormalized.includes(queryNormalized) || queryNormalized.includes(termNormalized)) {
+        // Allow if they're very different in length (e.g., "human" from "humanity" is ok)
+        if (Math.abs(termNormalized.length - queryNormalized.length) < 3) {
+            return false;
+        }
+    }
+
+    // 4. Meta-language filter: Reject common junk patterns
+    const junkPatterns = [
+        /^(example|here|are|the|terms|for|now|generate|related|following|list|some|many|various|types|kinds|forms|aspects|elements|components|parts)/,
+        /-(of|the|and|or|in|to|for|with|from|by|at|on)$/,  // Ends with preposition
+        /^(sub|meta|type|kind|form|aspect)-/,               // Meta-category prefixes
+        /(field|area|domain|discipline|branch|study|science|ology)$/  // Academic meta-terms
+    ];
+
+    for (const pattern of junkPatterns) {
+        if (pattern.test(term)) {
+            return false;
+        }
+    }
+
+    // 5. Character variety: Reject if too repetitive (e.g., "aaaa")
+    const uniqueChars = new Set(term.replace(/-/g, '')).size;
+    if (uniqueChars < 3) {
+        return false;
+    }
+
+    // 6. Common word filter: Reject very generic words
+    const genericWords = new Set([
+        'thing', 'stuff', 'item', 'object', 'element', 'part', 'piece',
+        'way', 'method', 'approach', 'technique', 'process', 'system',
+        'concept', 'idea', 'notion', 'theory', 'principle', 'rule'
+    ]);
+    if (genericWords.has(term)) {
+        return false;
+    }
+
+    return true;
+}
+
+/**
  * Ollama Provider - Local LLM via Ollama
  */
 export class OllamaProvider implements LLMProvider {
@@ -20,23 +79,15 @@ export class OllamaProvider implements LLMProvider {
     }
 
     async generateConcepts(query: string, count: number = 25): Promise<string[]> {
-        const prompt = `You are performing CONCEPTUAL REVELATION - unveiling the fundamental concepts within "${query}".
+        const prompt = `Generate ${count} fundamental concepts related to "${query}".
 
-Your task: Reveal ${count} CORE CONCEPTS (essences, not categories).
+Focus on core ideas and essences, not categories or subtypes.
+Return single words or hyphenated terms only.
+Format: comma-separated list, no explanations.
 
-CONCEPTUAL REVELATION Guidelines:
-- Seek FUNDAMENTAL IDEAS, not branches or subtypes
-- Example: "philosophy" → reveal "truth, justice, beauty, knowledge" NOT "feminist-philosophy, modern-philosophy"
-- Each concept should be atomic - a single essential idea
-- Reveal concepts that could form dyadic oppositions (pairs of complements)
-- Focus on the ESSENCE, not the surface
-- Return ONLY single words or hyphenated-terms (no phrases)
-- Format: comma-separated list, no explanations
+Example for "philosophy": truth, knowledge, justice, ethics, virtue, wisdom, logic, reason, consciousness, reality, existence, morality, freedom, meaning, beauty, good, evil, mind, matter, form
 
-Example revelation for "philosophy":
-truth, knowledge, justice, ethics, virtue, wisdom, logic, reason, consciousness, reality, existence, morality, freedom, meaning, beauty, good, evil, mind, matter, form
-
-Now reveal ${count} core concepts within "${query}":`;
+Concepts for "${query}":`;
 
         try {
             console.log(`🔧 Ollama: Requesting ${count} concepts with enhanced parameters`);
@@ -83,17 +134,21 @@ Now reveal ${count} core concepts within "${query}":`;
 
             // Deduplicate terms
             const uniqueTerms = Array.from(new Set<string>(terms));
+            console.log(`🦙 Ollama parsed ${uniqueTerms.length} unique terms (from ${terms.length} total)`);
 
-            console.log(`🦙 Ollama parsed ${uniqueTerms.length} unique concepts for "${query}" (from ${terms.length} total)`);
+            // Apply validation filter
+            const validatedTerms = uniqueTerms.filter((term: string) => validateConcept(term, query));
+            const rejectedCount = uniqueTerms.length - validatedTerms.length;
+            console.log(`✓ Validation: ${validatedTerms.length} passed, ${rejectedCount} rejected as junk`);
 
             // FALLBACK STRATEGY: If we got less than 50% of requested concepts, make additional requests
-            if (uniqueTerms.length < count * 0.5 && count > 25) {
-                console.warn(`⚠️ Only got ${uniqueTerms.length}/${count} concepts (${Math.round(uniqueTerms.length/count*100)}%). Trying multi-batch strategy...`);
+            if (validatedTerms.length < count * 0.5 && count > 25) {
+                console.warn(`⚠️ Only got ${validatedTerms.length}/${count} validated concepts (${Math.round(validatedTerms.length/count*100)}%). Trying multi-batch strategy...`);
 
                 // Strategy: Make multiple smaller requests (25-50 concepts each) and combine
                 const batchSize = 50;
                 const numBatches = Math.ceil(count / batchSize);
-                const allConcepts = new Set<string>(uniqueTerms);
+                const allConcepts = new Set<string>(validatedTerms);
 
                 for (let i = 1; i < numBatches && allConcepts.size < count; i++) {
                     console.log(`📦 Batch ${i+1}/${numBatches}: Requesting ${batchSize} more concepts...`);
@@ -128,12 +183,11 @@ Now reveal ${count} core concepts within "${query}":`;
                             .map((term: string) => term.replace(/[^a-z-\s]/g, ''))
                             .map((term: string) => term.trim())
                             .map((term: string) => term.replace(/\s+/g, '-'))
-                            .filter((term: string) => term.length > 2 && term.length < 35)
-                            .filter((term: string) => !term.match(/^(example|here|are|the|terms|for|now|generate|related)/))
-                            .filter((term: string) => term.match(/^[a-z][a-z-]*$/));
+                            .filter((term: string) => term.match(/^[a-z][a-z-]*$/))
+                            .filter((term: string) => validateConcept(term, query));  // Apply validation
 
                         batchTerms.forEach((term: string) => allConcepts.add(term));
-                        console.log(`📦 Batch ${i+1}: Added ${batchTerms.length} terms (total unique: ${allConcepts.size})`);
+                        console.log(`📦 Batch ${i+1}: Added ${batchTerms.length} validated terms (total: ${allConcepts.size})`);
                     }
                 }
 
@@ -143,7 +197,7 @@ Now reveal ${count} core concepts within "${query}":`;
             }
 
             // Normal case: we got enough concepts
-            const finalTerms = uniqueTerms.slice(0, count);
+            const finalTerms = validatedTerms.slice(0, count);
             console.log(`✅ Single request complete: ${finalTerms.length}/${count} concepts (${Math.round(finalTerms.length/count*100)}%)`);
             return finalTerms;
 
