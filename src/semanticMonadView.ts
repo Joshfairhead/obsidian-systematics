@@ -879,6 +879,18 @@ export class SemanticMonadView extends ItemView {
                 }
             }
 
+            // Add gentle centering force to prevent clustering at edges
+            // This balances repulsion and keeps concepts distributed throughout the circle
+            const distFromCenter = Math.sqrt(
+                conceptA.position2D.x ** 2 + conceptA.position2D.y ** 2
+            );
+            if (distFromCenter > 0.001) {
+                // Gentle attraction toward center (increases with distance)
+                const centeringForce = -0.0001 * distFromCenter;
+                fx += (conceptA.position2D.x / distFromCenter) * centeringForce;
+                fy += (conceptA.position2D.y / distFromCenter) * centeringForce;
+            }
+
             // Add Brownian motion (random thermal movement)
             fx += (Math.random() - 0.5) * this.brownianMotion;
             fy += (Math.random() - 0.5) * this.brownianMotion;

@@ -42,7 +42,7 @@ Now generate ${count} terms for "${query}":`;
                     stream: false,
                     options: {
                         temperature: 0.8,
-                        num_predict: 300
+                        num_predict: 1000  // Allow more tokens for more concepts
                     }
                 })
             });
@@ -66,11 +66,13 @@ Now generate ${count} terms for "${query}":`;
                 .map((term: string) => term.replace(/\s+/g, '-'))  // Convert spaces to hyphens for multi-word terms
                 .filter((term: string) => term.length > 2 && term.length < 35)  // Allow slightly longer for multi-word
                 .filter((term: string) => !term.match(/^(example|here|are|the|terms|for|now|generate|related)/))
-                .filter((term: string) => term.match(/^[a-z][a-z-]*$/))  // Single word or hyphenated terms
-                .slice(0, count);
+                .filter((term: string) => term.match(/^[a-z][a-z-]*$/));  // Single word or hyphenated terms
 
-            console.log(`🦙 Ollama parsed ${terms.length} concepts for "${query}":`, terms.slice(0, 10));
-            return terms;
+            // Slice to requested count AFTER parsing/filtering to ensure we get enough
+            const finalTerms = terms.slice(0, count);
+
+            console.log(`🦙 Ollama parsed ${finalTerms.length} concepts for "${query}" (from ${terms.length} valid terms):`, finalTerms.slice(0, 10));
+            return finalTerms;
 
         } catch (error) {
             console.error('Ollama error:', error);
