@@ -68,10 +68,13 @@ Now generate ${count} terms for "${query}":`;
                 .filter((term: string) => !term.match(/^(example|here|are|the|terms|for|now|generate|related)/))
                 .filter((term: string) => term.match(/^[a-z][a-z-]*$/));  // Single word or hyphenated terms
 
-            // Slice to requested count AFTER parsing/filtering to ensure we get enough
-            const finalTerms = terms.slice(0, count);
+            // Deduplicate terms
+            const uniqueTerms = Array.from(new Set<string>(terms));
 
-            console.log(`🦙 Ollama parsed ${finalTerms.length} concepts for "${query}" (from ${terms.length} valid terms):`, finalTerms.slice(0, 10));
+            // Slice to requested count AFTER deduplication
+            const finalTerms = uniqueTerms.slice(0, count);
+
+            console.log(`🦙 Ollama parsed ${finalTerms.length} unique concepts for "${query}" (from ${terms.length} total, ${uniqueTerms.length} unique):`, finalTerms.slice(0, 10));
             return finalTerms;
 
         } catch (error) {

@@ -131,7 +131,7 @@ export class SemanticMonadView extends ItemView {
 
         titleRow.createEl('h2', { text: 'Latent Space Explorer' });
         const versionEl = titleRow.createEl('span', {
-            text: 'v0.7.1',
+            text: 'v0.7.2',
             cls: 'version-badge'
         });
         versionEl.style.fontSize = '11px';
@@ -667,11 +667,21 @@ export class SemanticMonadView extends ItemView {
                 };
             });
 
-            // Return all generated concepts (display slider will filter them)
-            const withNotes = conceptsWithNotes.filter(c => c.hasNotes).length;
-            console.log(`✨ Generated: ${conceptsWithNotes.length} concepts (${withNotes} with notes, ${conceptsWithNotes.length - withNotes} pure latent)`);
+            // STEP 5: Deduplicate concepts by term
+            const seenTerms = new Set<string>();
+            const uniqueConcepts = conceptsWithNotes.filter(concept => {
+                if (seenTerms.has(concept.term)) {
+                    return false;
+                }
+                seenTerms.add(concept.term);
+                return true;
+            });
 
-            return conceptsWithNotes;
+            // Return all generated concepts (display slider will filter them)
+            const withNotes = uniqueConcepts.filter(c => c.hasNotes).length;
+            console.log(`✨ Generated: ${uniqueConcepts.length} unique concepts (${withNotes} with notes, ${uniqueConcepts.length - withNotes} pure latent)`);
+
+            return uniqueConcepts;
 
         } catch (error) {
             console.error('Error generating concepts:', error);
@@ -1485,8 +1495,16 @@ class PhysicsSettingsModal extends Modal {
         const { contentEl } = this;
         contentEl.empty();
 
-        // Style the modal to be smaller and positioned on the right
+        // Find the modal container - try multiple selectors
         this.draggableEl = contentEl.closest('.modal') as HTMLElement;
+        if (!this.draggableEl) {
+            this.draggableEl = contentEl.closest('.modal-container') as HTMLElement;
+        }
+        if (!this.draggableEl) {
+            // Fallback to parent element
+            this.draggableEl = contentEl.parentElement as HTMLElement;
+        }
+
         if (this.draggableEl) {
             this.draggableEl.style.width = '320px';
             this.draggableEl.style.maxWidth = '320px';
@@ -1495,11 +1513,18 @@ class PhysicsSettingsModal extends Modal {
             this.draggableEl.style.left = 'auto';
             this.draggableEl.style.top = '80px';
             this.draggableEl.style.transform = 'none';
+            console.log('Physics Settings Modal: draggable element found', this.draggableEl);
+        } else {
+            console.warn('Physics Settings Modal: could not find draggable element');
         }
 
-        const header = contentEl.createEl('h3', { text: 'Physics Settings' });
+        const header = contentEl.createEl('h3', { text: 'Physics Settings ⚙️ (drag me)' });
         header.style.cursor = 'move';
         header.style.userSelect = 'none';
+        header.style.padding = '8px';
+        header.style.margin = '-8px -8px 8px -8px';
+        header.style.backgroundColor = 'var(--background-modifier-border)';
+        header.style.borderRadius = '4px 4px 0 0';
 
         // Make header draggable
         header.addEventListener('mousedown', (e) => this.handleDragStart(e));
