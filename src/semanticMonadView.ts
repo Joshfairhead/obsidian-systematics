@@ -131,7 +131,7 @@ export class SemanticMonadView extends ItemView {
 
         titleRow.createEl('h2', { text: 'Latent Space Explorer' });
         const versionEl = titleRow.createEl('span', {
-            text: 'v0.7.2',
+            text: 'v0.7.3',
             cls: 'version-badge'
         });
         versionEl.style.fontSize = '11px';
@@ -185,16 +185,7 @@ export class SemanticMonadView extends ItemView {
             }
         });
 
-        // Physics settings button
-        const settingsButton = inputRow.createEl('button', { cls: 'clickable-icon' });
-        settingsButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12 1v6m0 6v6m0-15a9 9 0 0 1 9 9m-9-9a9 9 0 0 0-9 9m18 0a9 9 0 0 1-9 9m9-9h-6m-6 0H1m11 9a9 9 0 0 0 9-9"></path></svg>';
-        settingsButton.title = 'Physics Settings';
-        settingsButton.style.marginLeft = '5px';
-        settingsButton.addEventListener('click', () => {
-            new PhysicsSettingsModal(this.app, this).open();
-        });
-
-        // Generation count control (display count moved to physics settings)
+        // Generation count control
         const conceptControlsSection = searchSection.createDiv('concept-controls');
         conceptControlsSection.style.marginTop = '10px';
         conceptControlsSection.style.padding = '10px';
@@ -228,13 +219,42 @@ export class SemanticMonadView extends ItemView {
         // Left column: Canvas and concepts
         const leftColumn = contentLayout.createDiv('left-column');
 
-        this.canvas = leftColumn.createEl('canvas', {
+        // Canvas container with relative positioning for overlay button
+        const canvasContainer = leftColumn.createDiv('canvas-container');
+        canvasContainer.style.position = 'relative';
+        canvasContainer.style.width = '100%';
+
+        this.canvas = canvasContainer.createEl('canvas', {
             cls: 'semantic-monad-canvas'
         });
 
         const ctx = this.canvas.getContext('2d');
         if (!ctx) throw new Error('Could not get canvas context');
         this.ctx = ctx;
+
+        // Physics settings button overlay (top-right of canvas)
+        const settingsButton = canvasContainer.createEl('button', { cls: 'clickable-icon' });
+        settingsButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12 1v6m0 6v6m0-15a9 9 0 0 1 9 9m-9-9a9 9 0 0 0-9 9m18 0a9 9 0 0 1-9 9m9-9h-6m-6 0H1m11 9a9 9 0 0 0 9-9"></path></svg>';
+        settingsButton.title = 'Physics Settings';
+        settingsButton.style.position = 'absolute';
+        settingsButton.style.top = '10px';
+        settingsButton.style.right = '10px';
+        settingsButton.style.zIndex = '1000';
+        settingsButton.style.padding = '8px';
+        settingsButton.style.backgroundColor = 'var(--background-primary)';
+        settingsButton.style.border = '1px solid var(--background-modifier-border)';
+        settingsButton.style.borderRadius = '4px';
+        settingsButton.style.cursor = 'pointer';
+        settingsButton.style.opacity = '0.8';
+        settingsButton.addEventListener('mouseenter', () => {
+            settingsButton.style.opacity = '1.0';
+        });
+        settingsButton.addEventListener('mouseleave', () => {
+            settingsButton.style.opacity = '0.8';
+        });
+        settingsButton.addEventListener('click', () => {
+            new PhysicsSettingsModal(this.app, this).open();
+        });
 
         // Add click, hover, and drag handlers for canvas
         this.canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
@@ -608,10 +628,10 @@ export class SemanticMonadView extends ItemView {
             const query = Array.from(queryWords || []).join(' ');
             console.log(`🤖 Asking LLM for concepts related to: "${query}"`);
 
-            // Request 50% more to ensure we have enough after filtering
-            const requestAmount = Math.ceil(this.plugin.settings.conceptCount * 1.5);
+            // Request 100% more (2x) to ensure we have enough after filtering & deduplication
+            const requestAmount = Math.ceil(this.plugin.settings.conceptCount * 2);
             const llmConcepts = await this.llmService.generateConcepts(query, requestAmount);
-            console.log(`📝 LLM returned ${llmConcepts.length} concepts:`, llmConcepts.slice(0, 10));
+            console.log(`📝 LLM returned ${llmConcepts.length} concepts (requested ${requestAmount}):`, llmConcepts.slice(0, 10));
 
             // Filter out query words to avoid redundancy
             const filteredConcepts = llmConcepts.filter(term => {
@@ -859,8 +879,9 @@ export class SemanticMonadView extends ItemView {
                 conceptA.position2D.x ** 2 + conceptA.position2D.y ** 2
             );
             if (distFromCenter > 0.001) {
-                // Gentle attraction toward center (increases with distance)
-                const centeringForce = -0.0001 * distFromCenter;
+                // Gentle attraction toward center (quadratic - stronger at edges)
+                // Strength increases with distance squared for better distribution
+                const centeringForce = -0.0008 * distFromCenter * distFromCenter;
                 fx += (conceptA.position2D.x / distFromCenter) * centeringForce;
                 fy += (conceptA.position2D.y / distFromCenter) * centeringForce;
             }

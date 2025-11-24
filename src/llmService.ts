@@ -20,17 +20,19 @@ export class OllamaProvider implements LLMProvider {
     }
 
     async generateConcepts(query: string, count: number = 25): Promise<string[]> {
-        const prompt = `You are a semantic concept generator. Generate ${count} related terms for: "${query}"
+        const prompt = `You are a semantic concept generator. Generate ${count} CORE CONCEPTS (not subcategories or types) related to: "${query}"
 
 Rules:
+- Return fundamental concepts, NOT meta-categories or types
+- Example: For "philosophy", return "truth, justice, beauty, knowledge" NOT "feminist-philosophy, modern-philosophy"
 - Return ONLY single words or hyphenated-terms
 - No explanations, numbers, or extra text
 - Format as comma-separated list
-- Related to the topic semantically
+- Focus on the essential ideas, not branches or subcategories
 
-Example for "computer-science": algorithm, programming, software, database, network, compiler, data-structure, artificial-intelligence, machine-learning, operating-system
+Example for "philosophy": truth, knowledge, justice, ethics, virtue, wisdom, logic, reason, consciousness, reality, existence, morality, freedom, meaning, beauty
 
-Now generate ${count} terms for "${query}":`;
+Now generate ${count} core concepts for "${query}":`;
 
         try {
             const response = await fetch(`${this.endpoint}/api/generate`, {
@@ -42,7 +44,7 @@ Now generate ${count} terms for "${query}":`;
                     stream: false,
                     options: {
                         temperature: 0.8,
-                        num_predict: 1000  // Allow more tokens for more concepts
+                        num_predict: 2000  // Allow more tokens for up to 200 concepts
                     }
                 })
             });
