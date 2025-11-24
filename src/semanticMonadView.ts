@@ -131,7 +131,7 @@ export class SemanticMonadView extends ItemView {
 
         titleRow.createEl('h2', { text: 'Latent Space Explorer' });
         const versionEl = titleRow.createEl('span', {
-            text: 'v0.7.0',
+            text: 'v0.7.1',
             cls: 'version-badge'
         });
         versionEl.style.fontSize = '11px';
@@ -194,24 +194,20 @@ export class SemanticMonadView extends ItemView {
             new PhysicsSettingsModal(this.app, this).open();
         });
 
-        // Concept count controls
+        // Generation count control (display count moved to physics settings)
         const conceptControlsSection = searchSection.createDiv('concept-controls');
         conceptControlsSection.style.marginTop = '10px';
         conceptControlsSection.style.padding = '10px';
         conceptControlsSection.style.backgroundColor = 'var(--background-secondary)';
         conceptControlsSection.style.borderRadius = '4px';
 
-        // Generate count slider
-        const generateCountRow = conceptControlsSection.createDiv('slider-row');
-        generateCountRow.style.marginBottom = '10px';
-
-        const generateLabel = generateCountRow.createEl('label', {
+        const generateLabel = conceptControlsSection.createEl('label', {
             text: `Generate: ${this.plugin.settings.conceptCount} concepts`
         });
         generateLabel.style.display = 'block';
         generateLabel.style.marginBottom = '5px';
 
-        const generateSlider = generateCountRow.createEl('input', {
+        const generateSlider = conceptControlsSection.createEl('input', {
             type: 'range'
         });
         generateSlider.min = '10';
@@ -224,38 +220,6 @@ export class SemanticMonadView extends ItemView {
             this.plugin.settings.conceptCount = value;
             generateLabel.textContent = `Generate: ${value} concepts`;
             this.plugin.saveSettings();
-        });
-
-        // Display count slider
-        const displayCountRow = conceptControlsSection.createDiv('slider-row');
-
-        const displayLabel = displayCountRow.createEl('label', {
-            text: `Display: ${this.plugin.settings.displayConceptCount} concepts`
-        });
-        displayLabel.style.display = 'block';
-        displayLabel.style.marginBottom = '5px';
-
-        const displaySlider = displayCountRow.createEl('input', {
-            type: 'range'
-        });
-        displaySlider.min = '5';
-        displaySlider.max = '50';
-        displaySlider.step = '1';
-        displaySlider.value = String(this.plugin.settings.displayConceptCount);
-        displaySlider.style.width = '100%';
-        displaySlider.addEventListener('input', (e) => {
-            const value = parseInt((e.target as HTMLInputElement).value);
-            this.plugin.settings.displayConceptCount = value;
-            displayLabel.textContent = `Display: ${value} concepts`;
-            this.plugin.saveSettings();
-
-            // Re-render if we have current monad data
-            // Physics forces will naturally redistribute remaining concepts
-            if (this.currentMonad && this.currentMonad.concepts) {
-                this.displayConcepts();
-                this.displayNotes();
-                this.draw();
-            }
         });
 
         // Two-column layout
@@ -1619,6 +1583,29 @@ class PhysicsSettingsModal extends Modal {
             6,
             (value) => {
                 this.view.brownianMotion = value;
+            }
+        );
+
+        // Display concept count slider
+        this.createSlider(
+            controls,
+            'Display Concepts',
+            'Number of concepts to show (filters from generated set)',
+            this.view.plugin.settings.displayConceptCount,
+            5,
+            50,
+            1,
+            0,
+            (value) => {
+                this.view.plugin.settings.displayConceptCount = Math.round(value);
+                this.view.plugin.saveSettings();
+
+                // Re-render if we have current monad data
+                if (this.view.currentMonad && this.view.currentMonad.concepts) {
+                    this.view.displayConcepts();
+                    this.view.displayNotes();
+                    this.view.draw();
+                }
             }
         );
 
