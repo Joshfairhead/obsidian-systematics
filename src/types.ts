@@ -47,7 +47,7 @@ export interface SystematicsSettings {
     currentGraph: number; // Which Kn graph is currently selected (3-12)
     nodeLabelSettings: { [graphKey: string]: NodeLabelSettings };
 
-    // Latent Space Explorer Settings
+    // Latent Space Explorer Settings (LEGACY - will be replaced by embedding-based)
     llmProvider: 'ollama' | 'claude' | 'openai';
     ollamaModel: string;
     ollamaEndpoint: string;
@@ -55,6 +55,11 @@ export interface SystematicsSettings {
     openaiApiKey: string;
     conceptCount: number; // Number of concepts to generate (5-100)
     displayConceptCount: number; // Number of concepts to display after filtering
+
+    // Embedding-based Concept Explorer Settings
+    vocabularySource: 'systematics' | 'vault' | 'common' | 'llm-tokens';
+    embeddingSource: 'ollama' | 'minilm' | 'openai';
+    minilmEndpoint: string; // Endpoint for MiniLM embedding service
 }
 
 /**

@@ -7,14 +7,19 @@ const DEFAULT_SETTINGS: SystematicsSettings = {
     currentGraph: 3,
     nodeLabelSettings: {},
 
-    // Latent Space Explorer defaults
+    // Latent Space Explorer defaults (LEGACY)
     llmProvider: 'ollama',
     ollamaModel: 'llama2',
     ollamaEndpoint: 'http://localhost:11434',
     claudeApiKey: '',
     openaiApiKey: '',
     conceptCount: 50, // Generate 50 concepts by default
-    displayConceptCount: 25 // Display top 25 by default
+    displayConceptCount: 25, // Display top 25 by default
+
+    // Embedding-based Explorer defaults
+    vocabularySource: 'vault',  // Start with vault vocabulary
+    embeddingSource: 'minilm',  // Use existing MiniLM service
+    minilmEndpoint: 'http://localhost:8765'
 };
 
 export default class SystematicsPlugin extends Plugin {
@@ -224,6 +229,56 @@ class SystematicsSettingTab extends PluginSettingTab {
                         await this.plugin.saveSettings();
                     })
                     .inputEl.type = 'password');
+        }
+
+        // Embedding-based Explorer Settings
+        containerEl.createEl('h3', { text: 'Embedding-based Concept Explorer' });
+        containerEl.createEl('p', {
+            text: 'Explore conceptual latent space using direct embeddings (faster, deterministic)'
+        });
+
+        new Setting(containerEl)
+            .setName('Vocabulary Source')
+            .setDesc('Where to get concepts from')
+            .addDropdown(dropdown => {
+                dropdown.addOption('systematics', 'Systematics (K1-K12 Bennett)');
+                dropdown.addOption('vault', 'Vault (Your Notes)');
+                dropdown.addOption('common', 'Common Concepts');
+                dropdown.addOption('llm-tokens', 'LLM Tokens (Experimental)');
+                dropdown.setValue(this.plugin.settings.vocabularySource);
+                dropdown.onChange(async (value: any) => {
+                    this.plugin.settings.vocabularySource = value;
+                    await this.plugin.saveSettings();
+                });
+            });
+
+        new Setting(containerEl)
+            .setName('Embedding Source')
+            .setDesc('Which embedding model to use')
+            .addDropdown(dropdown => {
+                dropdown.addOption('minilm', 'MiniLM (Localhost:8765)');
+                dropdown.addOption('ollama', 'Ollama (Local LLM)');
+                dropdown.addOption('openai', 'OpenAI (API)');
+                dropdown.setValue(this.plugin.settings.embeddingSource);
+                dropdown.onChange(async (value: any) => {
+                    this.plugin.settings.embeddingSource = value;
+                    await this.plugin.saveSettings();
+                    this.display(); // Refresh to show/hide relevant settings
+                });
+            });
+
+        // MiniLM endpoint (show if minilm selected)
+        if (this.plugin.settings.embeddingSource === 'minilm') {
+            new Setting(containerEl)
+                .setName('MiniLM Endpoint')
+                .setDesc('Embedding service URL (default: http://localhost:8765)')
+                .addText(text => text
+                    .setPlaceholder('http://localhost:8765')
+                    .setValue(this.plugin.settings.minilmEndpoint)
+                    .onChange(async (value) => {
+                        this.plugin.settings.minilmEndpoint = value;
+                        await this.plugin.saveSettings();
+                    }));
         }
 
         containerEl.createEl('h3', { text: 'About' });
