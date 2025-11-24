@@ -1126,10 +1126,13 @@ export class SemanticMonadView extends ItemView {
         this.ctx.textAlign = 'center';
         this.ctx.fillText(this.currentMonad.query, centerX, centerY + 25);
 
-        // Draw dyad connection line if 2 concepts are selected
+        // Limit concepts to display based on slider
+        const conceptsToDisplay = this.currentMonad.concepts.slice(0, this.plugin.settings.displayConceptCount);
+
+        // Draw dyad connection line if 2 concepts are selected and both are visible
         if (this.selectedConcepts.length === 2) {
-            const concept1 = this.currentMonad.concepts.find(c => c.term === this.selectedConcepts[0]);
-            const concept2 = this.currentMonad.concepts.find(c => c.term === this.selectedConcepts[1]);
+            const concept1 = conceptsToDisplay.find(c => c.term === this.selectedConcepts[0]);
+            const concept2 = conceptsToDisplay.find(c => c.term === this.selectedConcepts[1]);
 
             if (concept1?.position2D && concept2?.position2D) {
                 const pos1 = ProjectionEngine.toCanvasCoords(concept1.position2D, centerX, centerY, radius * 0.9);
@@ -1159,7 +1162,7 @@ export class SemanticMonadView extends ItemView {
         // Draw concepts at their projected 2D positions
         this.ctx.font = '11px sans-serif';
 
-        for (const concept of this.currentMonad.concepts) {
+        for (const concept of conceptsToDisplay) {
             if (!concept.position2D) continue;
 
             // Use physics-updated position (no artificial drift needed)
