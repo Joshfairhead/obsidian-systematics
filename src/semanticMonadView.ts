@@ -250,9 +250,8 @@ export class SemanticMonadView extends ItemView {
             this.plugin.saveSettings();
 
             // Re-render if we have current monad data
+            // Physics forces will naturally redistribute remaining concepts
             if (this.currentMonad && this.currentMonad.concepts) {
-                // Redistribute concepts evenly when count changes
-                this.redistributeConceptsEvenly();
                 this.displayConcepts();
                 this.displayNotes();
                 this.draw();
@@ -640,12 +639,14 @@ export class SemanticMonadView extends ItemView {
         }
 
         try {
-            // STEP 1: Ask LLM to generate related concepts (add 20% buffer for filtering)
+            // STEP 1: Ask LLM to generate related concepts
+            // Request extra to account for filtering and ensure we get conceptCount
             const query = Array.from(queryWords || []).join(' ');
             console.log(`🤖 Asking LLM for concepts related to: "${query}"`);
 
-            const bufferAmount = Math.ceil(this.plugin.settings.conceptCount * 1.2);
-            const llmConcepts = await this.llmService.generateConcepts(query, bufferAmount);
+            // Request 50% more to ensure we have enough after filtering
+            const requestAmount = Math.ceil(this.plugin.settings.conceptCount * 1.5);
+            const llmConcepts = await this.llmService.generateConcepts(query, requestAmount);
             console.log(`📝 LLM returned ${llmConcepts.length} concepts:`, llmConcepts.slice(0, 10));
 
             // Filter out query words to avoid redundancy
@@ -907,63 +908,6 @@ export class SemanticMonadView extends ItemView {
 
             // Update stored position
             this.conceptPositions.set(conceptA.term, conceptA.position2D);
-        }
-    }
-
-    /**
-     * Redistribute concepts evenly across the monad when display count changes
-     */
-    redistributeConceptsEvenly() {
-        if (!this.currentMonad) return;
-
-        const visibleCount = Math.min(
-            this.plugin.settings.displayConceptCount,
-            this.currentMonad.concepts.length
-        );
-        const visibleConcepts = this.currentMonad.concepts.slice(0, visibleCount);
-
-        // Arrange concepts in concentric circles for even distribution
-        // Innermost circle has fewer concepts, outer circles have more
-
-        const maxRadius = this.boundaryDistance * 0.85; // Stay within boundary
-        const numRings = Math.ceil(Math.sqrt(visibleCount)); // Number of concentric rings
-
-        let conceptIndex = 0;
-
-        for (let ring = 0; ring < numRings; ring++) {
-            // Radius for this ring (evenly spaced from center to edge)
-            const radius = (ring + 1) / numRings * maxRadius;
-
-            // Concepts in this ring (more in outer rings)
-            const conceptsInRing = ring === 0 ? 1 : Math.ceil(2 * Math.PI * radius * 3);
-            const actualConceptsInRing = Math.min(conceptsInRing, visibleCount - conceptIndex);
-
-            for (let i = 0; i < actualConceptsInRing && conceptIndex < visibleCount; i++) {
-                const concept = visibleConcepts[conceptIndex];
-
-                // Angle for even distribution around the circle
-                const angle = (i / actualConceptsInRing) * 2 * Math.PI;
-
-                // Position on circle
-                const x = radius * Math.cos(angle);
-                const y = radius * Math.sin(angle);
-
-                // Update concept position
-                if (concept.position2D) {
-                    concept.position2D.x = x;
-                    concept.position2D.y = y;
-                    this.conceptPositions.set(concept.term, concept.position2D);
-
-                    // Reset velocity to avoid drift
-                    const vel = this.conceptVelocities.get(concept.term);
-                    if (vel) {
-                        vel.vx = 0;
-                        vel.vy = 0;
-                    }
-                }
-
-                conceptIndex++;
-            }
         }
     }
 
