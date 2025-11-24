@@ -39,6 +39,8 @@ truth, knowledge, justice, ethics, virtue, wisdom, logic, reason, consciousness,
 Now reveal ${count} core concepts within "${query}":`;
 
         try {
+            console.log(`🔧 Ollama: Requesting ${count} concepts with enhanced parameters`);
+
             const response = await fetch(`${this.endpoint}/api/generate`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -48,7 +50,11 @@ Now reveal ${count} core concepts within "${query}":`;
                     stream: false,
                     options: {
                         temperature: 0.8,
-                        num_predict: 2000  // Allow more tokens for up to 200 concepts
+                        num_ctx: 4096,        // Context window - CRITICAL for long outputs
+                        num_predict: -1,      // No limit on output tokens (-1 = unlimited)
+                        repeat_penalty: 1.1,  // Encourage variety
+                        top_k: 40,            // Diversity in token selection
+                        top_p: 0.9            // Nucleus sampling for quality
                     }
                 })
             });
@@ -60,7 +66,8 @@ Now reveal ${count} core concepts within "${query}":`;
             const data = await response.json();
             const text = data.response.trim();
 
-            console.log(`🦙 Ollama raw response for "${query}":`, text.substring(0, 200));
+            console.log(`🦙 Ollama raw response for "${query}" (length: ${text.length} chars):`, text.substring(0, 300));
+            console.log(`🦙 Ollama raw response END:`, text.substring(text.length - 100));
 
             // Parse comma-separated terms, very lenient parsing
             const terms = text
@@ -77,10 +84,67 @@ Now reveal ${count} core concepts within "${query}":`;
             // Deduplicate terms
             const uniqueTerms = Array.from(new Set<string>(terms));
 
-            // Slice to requested count AFTER deduplication
-            const finalTerms = uniqueTerms.slice(0, count);
+            console.log(`🦙 Ollama parsed ${uniqueTerms.length} unique concepts for "${query}" (from ${terms.length} total)`);
 
-            console.log(`🦙 Ollama parsed ${finalTerms.length} unique concepts for "${query}" (from ${terms.length} total, ${uniqueTerms.length} unique):`, finalTerms.slice(0, 10));
+            // FALLBACK STRATEGY: If we got less than 50% of requested concepts, make additional requests
+            if (uniqueTerms.length < count * 0.5 && count > 25) {
+                console.warn(`⚠️ Only got ${uniqueTerms.length}/${count} concepts (${Math.round(uniqueTerms.length/count*100)}%). Trying multi-batch strategy...`);
+
+                // Strategy: Make multiple smaller requests (25-50 concepts each) and combine
+                const batchSize = 50;
+                const numBatches = Math.ceil(count / batchSize);
+                const allConcepts = new Set<string>(uniqueTerms);
+
+                for (let i = 1; i < numBatches && allConcepts.size < count; i++) {
+                    console.log(`📦 Batch ${i+1}/${numBatches}: Requesting ${batchSize} more concepts...`);
+
+                    const batchResponse = await fetch(`${this.endpoint}/api/generate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model: this.model,
+                            prompt: prompt.replace(`${count} CORE CONCEPTS`, `${batchSize} CORE CONCEPTS`),
+                            stream: false,
+                            options: {
+                                temperature: 0.8 + (i * 0.05), // Increase temp slightly for variety
+                                num_ctx: 4096,
+                                num_predict: -1,
+                                repeat_penalty: 1.1,
+                                top_k: 40,
+                                top_p: 0.9
+                            }
+                        })
+                    });
+
+                    if (batchResponse.ok) {
+                        const batchData = await batchResponse.json();
+                        const batchText = batchData.response.trim();
+
+                        // Parse batch concepts
+                        const batchTerms = batchText
+                            .split(/[,\n]/)
+                            .map((term: string) => term.trim().toLowerCase())
+                            .map((term: string) => term.replace(/^[-\d.)\s]+/, ''))
+                            .map((term: string) => term.replace(/[^a-z-\s]/g, ''))
+                            .map((term: string) => term.trim())
+                            .map((term: string) => term.replace(/\s+/g, '-'))
+                            .filter((term: string) => term.length > 2 && term.length < 35)
+                            .filter((term: string) => !term.match(/^(example|here|are|the|terms|for|now|generate|related)/))
+                            .filter((term: string) => term.match(/^[a-z][a-z-]*$/));
+
+                        batchTerms.forEach((term: string) => allConcepts.add(term));
+                        console.log(`📦 Batch ${i+1}: Added ${batchTerms.length} terms (total unique: ${allConcepts.size})`);
+                    }
+                }
+
+                const finalTerms = Array.from(allConcepts).slice(0, count);
+                console.log(`✅ Multi-batch complete: ${finalTerms.length}/${count} concepts (${Math.round(finalTerms.length/count*100)}%)`);
+                return finalTerms;
+            }
+
+            // Normal case: we got enough concepts
+            const finalTerms = uniqueTerms.slice(0, count);
+            console.log(`✅ Single request complete: ${finalTerms.length}/${count} concepts (${Math.round(finalTerms.length/count*100)}%)`);
             return finalTerms;
 
         } catch (error) {
