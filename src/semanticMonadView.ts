@@ -131,7 +131,7 @@ export class SemanticMonadView extends ItemView {
 
         titleRow.createEl('h2', { text: 'Latent Space Explorer' });
         const versionEl = titleRow.createEl('span', {
-            text: 'v0.7.3',
+            text: 'v0.7.4',
             cls: 'version-badge'
         });
         versionEl.style.fontSize = '11px';
@@ -630,22 +630,24 @@ export class SemanticMonadView extends ItemView {
 
             // Request 100% more (2x) to ensure we have enough after filtering & deduplication
             const requestAmount = Math.ceil(this.plugin.settings.conceptCount * 2);
+            console.log(`📊 STEP 1: Requesting ${requestAmount} concepts from LLM (target: ${this.plugin.settings.conceptCount})`);
             const llmConcepts = await this.llmService.generateConcepts(query, requestAmount);
-            console.log(`📝 LLM returned ${llmConcepts.length} concepts (requested ${requestAmount}):`, llmConcepts.slice(0, 10));
+            console.log(`📝 STEP 1 RESULT: LLM returned ${llmConcepts.length}/${requestAmount} concepts:`, llmConcepts.slice(0, 10));
 
             // Filter out query words to avoid redundancy
             const filteredConcepts = llmConcepts.filter(term => {
                 if (!queryWords) return true;
                 return !queryWords.has(term.toLowerCase());
             });
+            console.log(`🔍 STEP 2 RESULT: After query word filtering: ${filteredConcepts.length}/${llmConcepts.length} concepts (removed ${llmConcepts.length - filteredConcepts.length})`);
 
             if (filteredConcepts.length === 0) {
-                console.warn('No concepts after filtering');
+                console.warn('⚠️ No concepts after filtering query words');
                 return [];
             }
 
             // STEP 2: Embed LLM-generated concepts
-            console.log('🧬 Embedding LLM concepts...');
+            console.log(`🧬 STEP 3: Embedding ${filteredConcepts.length} concepts...`);
             const conceptEmbeddings = await this.embeddingService.embedBatch(filteredConcepts);
 
             // STEP 3: Rank by semantic similarity to query
@@ -665,8 +667,8 @@ export class SemanticMonadView extends ItemView {
             // Sort by similarity and take top N
             rankedConcepts.sort((a, b) => b.similarity - a.similarity);
             const topConcepts = rankedConcepts.slice(0, this.plugin.settings.conceptCount);
-
-            console.log('🎯 Top ranked concepts:', topConcepts.slice(0, 5).map(c => `${c.term} (${(c.similarity * 100).toFixed(0)}%)`));
+            console.log(`📈 STEP 4 RESULT: After ranking and slicing to ${this.plugin.settings.conceptCount}: ${topConcepts.length} concepts`);
+            console.log('🎯 Top 5 ranked concepts:', topConcepts.slice(0, 5).map(c => `${c.term} (${(c.similarity * 100).toFixed(0)}%)`));
 
             // STEP 4: Check which concepts have notes in vault
             const allRecords = await this.vectorIndex.getAllRecords();
@@ -688,6 +690,7 @@ export class SemanticMonadView extends ItemView {
             });
 
             // STEP 5: Deduplicate concepts by term
+            console.log(`🔄 STEP 5: Deduplicating ${conceptsWithNotes.length} concepts...`);
             const seenTerms = new Set<string>();
             const uniqueConcepts = conceptsWithNotes.filter(concept => {
                 if (seenTerms.has(concept.term)) {
@@ -696,10 +699,12 @@ export class SemanticMonadView extends ItemView {
                 seenTerms.add(concept.term);
                 return true;
             });
+            console.log(`✅ STEP 5 RESULT: After deduplication: ${uniqueConcepts.length}/${conceptsWithNotes.length} concepts (removed ${conceptsWithNotes.length - uniqueConcepts.length} duplicates)`);
 
             // Return all generated concepts (display slider will filter them)
             const withNotes = uniqueConcepts.filter(c => c.hasNotes).length;
-            console.log(`✨ Generated: ${uniqueConcepts.length} unique concepts (${withNotes} with notes, ${uniqueConcepts.length - withNotes} pure latent)`);
+            console.log(`✨ FINAL: Returning ${uniqueConcepts.length} unique concepts (${withNotes} with notes, ${uniqueConcepts.length - withNotes} pure latent)`);
+            console.log(`📊 SUMMARY: Requested ${this.plugin.settings.conceptCount}, Got ${uniqueConcepts.length} (${((uniqueConcepts.length / this.plugin.settings.conceptCount) * 100).toFixed(0)}%)`);
 
             return uniqueConcepts;
 

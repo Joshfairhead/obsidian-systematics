@@ -20,19 +20,23 @@ export class OllamaProvider implements LLMProvider {
     }
 
     async generateConcepts(query: string, count: number = 25): Promise<string[]> {
-        const prompt = `You are a semantic concept generator. Generate ${count} CORE CONCEPTS (not subcategories or types) related to: "${query}"
+        const prompt = `You are performing CONCEPTUAL REVELATION - unveiling the fundamental concepts within "${query}".
 
-Rules:
-- Return fundamental concepts, NOT meta-categories or types
-- Example: For "philosophy", return "truth, justice, beauty, knowledge" NOT "feminist-philosophy, modern-philosophy"
-- Return ONLY single words or hyphenated-terms
-- No explanations, numbers, or extra text
-- Format as comma-separated list
-- Focus on the essential ideas, not branches or subcategories
+Your task: Reveal ${count} CORE CONCEPTS (essences, not categories).
 
-Example for "philosophy": truth, knowledge, justice, ethics, virtue, wisdom, logic, reason, consciousness, reality, existence, morality, freedom, meaning, beauty
+CONCEPTUAL REVELATION Guidelines:
+- Seek FUNDAMENTAL IDEAS, not branches or subtypes
+- Example: "philosophy" → reveal "truth, justice, beauty, knowledge" NOT "feminist-philosophy, modern-philosophy"
+- Each concept should be atomic - a single essential idea
+- Reveal concepts that could form dyadic oppositions (pairs of complements)
+- Focus on the ESSENCE, not the surface
+- Return ONLY single words or hyphenated-terms (no phrases)
+- Format: comma-separated list, no explanations
 
-Now generate ${count} core concepts for "${query}":`;
+Example revelation for "philosophy":
+truth, knowledge, justice, ethics, virtue, wisdom, logic, reason, consciousness, reality, existence, morality, freedom, meaning, beauty, good, evil, mind, matter, form
+
+Now reveal ${count} core concepts within "${query}":`;
 
         try {
             const response = await fetch(`${this.endpoint}/api/generate`, {
