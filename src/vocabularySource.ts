@@ -31,47 +31,63 @@ export class SystematicsVocabulary implements VocabularySource {
     description = "Bennett's ontological systematics - geometrically structured concepts";
 
     async getVocabulary(): Promise<string[]> {
-        // K1-K12 ontological terms
-        // TODO: Load from file or expand this set
+        // Bennett's K1-K12 ontological systematics
+        // Comprehensive vocabulary including geometric and conceptual terms
         return [
-            // K1 - Monad
-            "monad", "unity", "whole", "one", "singularity",
+            // K1 - Monad (Unity, Wholeness)
+            "monad", "unity", "whole", "one", "singularity", "absolute",
+            "undivided", "source", "origin", "totality", "being",
 
-            // K2 - Dyad
-            "dyad", "duality", "polarity", "opposition", "pair",
-            "subject", "object", "self", "other",
+            // K2 - Dyad (Duality, Opposition)
+            "dyad", "duality", "polarity", "opposition", "pair", "binary",
+            "subject", "object", "self", "other", "inner", "outer",
+            "active", "passive", "positive", "negative", "light", "dark",
+            "male", "female", "mind", "body", "form", "matter",
 
-            // K3 - Triad
-            "triad", "trinity", "synthesis", "mediation",
-            "thesis", "antithesis", "reconciliation",
+            // K3 - Triad (Mediation, Synthesis)
+            "triad", "trinity", "synthesis", "mediation", "reconciliation",
+            "thesis", "antithesis", "neutralizing", "affirming", "denying",
+            "past", "present", "future", "beginning", "middle", "end",
+            "father", "mother", "child", "spirit", "soul", "essence",
 
-            // K4 - Tetrad
-            "tetrad", "quaternary", "foundation", "stability",
-            "element", "direction", "season",
+            // K4 - Tetrad (Foundation, Stability)
+            "tetrad", "quaternary", "foundation", "stability", "structure",
+            "earth", "water", "air", "fire", "north", "south", "east", "west",
+            "spring", "summer", "autumn", "winter", "solid", "liquid", "gas",
+            "material", "vital", "automatic", "sensitive",
 
-            // K5 - Pentad
-            "pentad", "quintessence", "center", "integration",
+            // K5 - Pentad (Quintessence, Integration)
+            "pentad", "quintessence", "center", "integration", "potential",
+            "consciousness", "awareness", "will", "attention", "choice",
 
-            // K6 - Hexad
-            "hexad", "harmony", "balance", "proportion",
+            // K6 - Hexad (Harmony, Completion)
+            "hexad", "harmony", "balance", "proportion", "relationship",
+            "interaction", "communication", "exchange", "function", "purpose",
 
-            // K7 - Heptad
-            "heptad", "process", "transformation", "cycle",
+            // K7 - Heptad (Process, Transformation)
+            "heptad", "process", "transformation", "cycle", "octave",
+            "development", "evolution", "growth", "change", "becoming",
+            "do", "re", "mi", "fa", "sol", "la", "ti",
 
-            // K8 - Octad
-            "octad", "regeneration", "recursion",
+            // K8 - Octad (Regeneration, Recursion)
+            "octad", "regeneration", "recursion", "pattern", "organization",
+            "system", "wholeness", "integrity", "coherence", "order",
 
-            // K9 - Ennead
-            "ennead", "completion", "fulfillment",
+            // K9 - Ennead (Completion, Fulfillment)
+            "ennead", "completion", "fulfillment", "realization", "actualization",
+            "manifestation", "expression", "individuality", "personality",
 
-            // K10 - Decad
-            "decad", "perfection", "manifestation",
+            // K10 - Decad (Perfection, Law)
+            "decad", "perfection", "law", "principle", "cosmos", "universe",
+            "totality", "completeness", "all", "everything", "infinity",
 
-            // K11 - Endecad
-            "endecad", "transition", "threshold",
+            // K11 - Endecad (Transition, Threshold)
+            "endecad", "transition", "threshold", "bridge", "passage",
+            "transformation", "gateway", "boundary", "limit", "horizon",
 
-            // K12 - Dodecad
-            "dodecad", "totality", "cosmos", "completion"
+            // K12 - Dodecad (Cosmic Completion)
+            "dodecad", "zodiac", "cosmic", "universal", "absolute-completion",
+            "eternal", "timeless", "spaceless", "infinite-potential"
         ];
     }
 }

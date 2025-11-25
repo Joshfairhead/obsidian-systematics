@@ -9,6 +9,19 @@ import { VectorIndex } from './vectorIndex';
 import { ProjectionEngine } from './projectionEngine';
 import { SemanticMonad, Point2D, ConceptNode, ScoredNote } from './semanticTypes';
 import { LLMService } from './llmService';
+import { ConceptExplorer } from './conceptExplorer';
+import {
+    VocabularySource,
+    SystematicsVocabulary,
+    VaultVocabulary,
+    CommonConceptsVocabulary
+} from './vocabularySource';
+import {
+    EmbeddingSource,
+    OllamaEmbeddings,
+    MiniLMEmbeddings,
+    OpenAIEmbeddings
+} from './embeddingSource';
 
 export const VIEW_TYPE_SEMANTIC_MONAD = 'systematics-semantic-monad';
 
@@ -18,6 +31,9 @@ export class SemanticMonadView extends ItemView {
     vectorIndex: VectorIndex;
     projectionEngine: ProjectionEngine;
     llmService: LLMService | null = null;
+    conceptExplorer: ConceptExplorer | null = null;
+    useEmbeddingMode: boolean = false;  // Toggle between LLM and embedding-based
+    filterMode: 'all' | 'domain' | 'concept' = 'all';  // Basic filter
 
     // UI Elements
     canvas: HTMLCanvasElement;
@@ -96,6 +112,9 @@ export class SemanticMonadView extends ItemView {
 
             // Initialize LLM service based on settings
             this.initializeLLMService();
+
+            // Initialize ConceptExplorer (embedding-based exploration)
+            this.initializeConceptExplorer();
         } catch (error) {
             new Notice('Failed to initialize semantic search: ' + error.message);
             console.error(error);
@@ -121,6 +140,56 @@ export class SemanticMonadView extends ItemView {
         }
     }
 
+    initializeConceptExplorer() {
+        try {
+            const settings = this.plugin.settings;
+
+            // Create vocabulary source based on settings
+            let vocabularySource: VocabularySource;
+            switch (settings.vocabularySource) {
+                case 'systematics':
+                    vocabularySource = new SystematicsVocabulary();
+                    break;
+                case 'vault':
+                    vocabularySource = new VaultVocabulary(this.app);
+                    break;
+                case 'common':
+                    vocabularySource = new CommonConceptsVocabulary();
+                    break;
+                default:
+                    vocabularySource = new VaultVocabulary(this.app);
+            }
+
+            // Create embedding source based on settings
+            let embeddingSource: EmbeddingSource;
+            switch (settings.embeddingSource) {
+                case 'ollama':
+                    embeddingSource = new OllamaEmbeddings(
+                        settings.ollamaEndpoint,
+                        settings.ollamaModel
+                    );
+                    break;
+                case 'minilm':
+                    embeddingSource = new MiniLMEmbeddings(settings.minilmEndpoint);
+                    break;
+                case 'openai':
+                    embeddingSource = new OpenAIEmbeddings(settings.openaiApiKey);
+                    break;
+                default:
+                    embeddingSource = new MiniLMEmbeddings(settings.minilmEndpoint);
+            }
+
+            // Create ConceptExplorer with vocabulary + embedding sources
+            this.conceptExplorer = new ConceptExplorer(vocabularySource, embeddingSource);
+
+            console.log(`🔍 ConceptExplorer initialized: ${vocabularySource.name} + ${embeddingSource.name}`);
+
+        } catch (error) {
+            console.error('Failed to initialize ConceptExplorer:', error);
+            new Notice(`ConceptExplorer initialization failed: ${error.message}`);
+        }
+    }
+
     createUI(container: Element) {
         // Header
         const header = container.createDiv('semantic-monad-header');
@@ -131,7 +200,7 @@ export class SemanticMonadView extends ItemView {
 
         titleRow.createEl('h2', { text: 'Latent Space Explorer' });
         const versionEl = titleRow.createEl('span', {
-            text: 'v0.7.4',
+            text: 'v0.8.0',
             cls: 'version-badge'
         });
         versionEl.style.fontSize = '11px';
@@ -211,6 +280,61 @@ export class SemanticMonadView extends ItemView {
             this.plugin.settings.conceptCount = value;
             generateLabel.textContent = `Generate: ${value} concepts`;
             this.plugin.saveSettings();
+        });
+
+        // Mode toggle (LLM vs Embedding-based)
+        const modeSection = conceptControlsSection.createDiv();
+        modeSection.style.marginTop = '15px';
+        modeSection.style.paddingTop = '10px';
+        modeSection.style.borderTop = '1px solid var(--background-modifier-border)';
+
+        const modeLabel = modeSection.createEl('label', {
+            text: 'Exploration Mode:'
+        });
+        modeLabel.style.display = 'block';
+        modeLabel.style.marginBottom = '5px';
+        modeLabel.style.fontWeight = 'bold';
+
+        const modeToggle = modeSection.createEl('select');
+        modeToggle.style.width = '100%';
+        modeToggle.style.padding = '4px';
+
+        const llmOption = modeToggle.createEl('option', {
+            text: '🤖 LLM Generation (Legacy)',
+            value: 'llm'
+        });
+        const embeddingOption = modeToggle.createEl('option', {
+            text: '🔍 Embedding-based (Direct Latent Space)',
+            value: 'embedding'
+        });
+        modeToggle.value = this.useEmbeddingMode ? 'embedding' : 'llm';
+        modeToggle.addEventListener('change', (e) => {
+            this.useEmbeddingMode = (e.target as HTMLSelectElement).value === 'embedding';
+            console.log(`Switched to ${this.useEmbeddingMode ? 'embedding-based' : 'LLM'} mode`);
+        });
+
+        // Filter controls (only shown in embedding mode)
+        const filterSection = conceptControlsSection.createDiv();
+        filterSection.style.marginTop = '10px';
+
+        const filterLabel = filterSection.createEl('label', {
+            text: 'Filter:'
+        });
+        filterLabel.style.display = 'block';
+        filterLabel.style.marginBottom = '5px';
+
+        const filterSelect = filterSection.createEl('select');
+        filterSelect.style.width = '100%';
+        filterSelect.style.padding = '4px';
+
+        filterSelect.createEl('option', { text: 'All Concepts', value: 'all' });
+        filterSelect.createEl('option', { text: 'Domains Only (-ology, -ics, -ism)', value: 'domain' });
+        filterSelect.createEl('option', { text: 'Core Concepts Only', value: 'concept' });
+
+        filterSelect.value = this.filterMode;
+        filterSelect.addEventListener('change', (e) => {
+            this.filterMode = (e.target as HTMLSelectElement).value as any;
+            console.log(`Filter mode: ${this.filterMode}`);
         });
 
         // Two-column layout
@@ -560,13 +684,20 @@ export class SemanticMonadView extends ItemView {
                 return;
             }
 
-            // Extract concepts from top notes (pass query words to filter out)
-            const queryWords = new Set(queryNormalized.split(/\s+/).filter(w => w.length > 3));
-            const concepts = await this.extractSemanticConcepts(
-                nearestNotes.slice(0, 20),
-                queryEmbedding,
-                queryWords
-            );
+            // Extract concepts - route based on mode
+            let concepts: ConceptNode[];
+            if (this.useEmbeddingMode) {
+                // Embedding-based: Direct latent space exploration
+                concepts = await this.extractConceptsViaEmbedding(query, queryEmbedding);
+            } else {
+                // LLM-based: Generate concepts via LLM (legacy)
+                const queryWords = new Set(queryNormalized.split(/\s+/).filter(w => w.length > 3));
+                concepts = await this.extractSemanticConcepts(
+                    nearestNotes.slice(0, 20),
+                    queryEmbedding,
+                    queryWords
+                );
+            }
 
             // Project to 2D
             const projection = await this.projectToVisualization(
@@ -602,6 +733,80 @@ export class SemanticMonadView extends ItemView {
                 new Notice('Search failed: ' + errorMsg, 8000);
             }
             console.error('Semantic search error:', error);
+        }
+    }
+
+    /**
+     * Extract concepts using EMBEDDING-BASED direct latent space exploration
+     * Uses ConceptExplorer with swappable vocabulary and embedding sources
+     */
+    async extractConceptsViaEmbedding(
+        query: string,
+        queryEmbedding: number[]
+    ): Promise<ConceptNode[]> {
+        console.log('🔍 Exploring latent space via embeddings...');
+
+        if (!this.conceptExplorer) {
+            console.error('ConceptExplorer not initialized');
+            new Notice('ConceptExplorer not configured. Check plugin settings.');
+            return [];
+        }
+
+        try {
+            // STEP 1: Explore latent space with ConceptExplorer
+            const count = this.plugin.settings.conceptCount;
+            console.log(`🌐 Querying ConceptExplorer for ${count} concepts...`);
+            const conceptsWithScores = await this.conceptExplorer.explore(query, count);
+            console.log(`✅ ConceptExplorer returned ${conceptsWithScores.length} concepts`);
+
+            // STEP 2: Apply basic filter
+            let filteredConcepts = conceptsWithScores;
+            if (this.filterMode === 'domain') {
+                filteredConcepts = conceptsWithScores.filter(c => {
+                    const term = c.term.toLowerCase();
+                    return term.endsWith('ology') || term.endsWith('ics') || term.endsWith('ism') ||
+                           term.endsWith('graphy') || term.endsWith('metry') || term.endsWith('sophy');
+                });
+                console.log(`🔍 Domain filter: ${filteredConcepts.length}/${conceptsWithScores.length} concepts`);
+            } else if (this.filterMode === 'concept') {
+                filteredConcepts = conceptsWithScores.filter(c => {
+                    const term = c.term.toLowerCase();
+                    return !term.endsWith('ology') && !term.endsWith('ics') && !term.endsWith('ism') &&
+                           !term.endsWith('graphy') && !term.endsWith('metry') && !term.endsWith('sophy');
+                });
+                console.log(`🔍 Concept filter: ${filteredConcepts.length}/${conceptsWithScores.length} concepts`);
+            }
+
+            // STEP 3: Check which concepts have notes in vault
+            const allRecords = await this.vectorIndex.getAllRecords();
+            const conceptNodes: ConceptNode[] = filteredConcepts.map(concept => {
+                // Check if any notes relate to this concept
+                const relatedNotes = allRecords.filter(record => {
+                    const title = record.metadata.title.toLowerCase();
+                    const path = record.id.toLowerCase();
+                    const term = concept.term.toLowerCase();
+
+                    return title.includes(term) || path.includes(term);
+                });
+
+                return {
+                    term: concept.term,
+                    embedding: concept.embedding!,
+                    similarity: concept.score,
+                    hasNotes: relatedNotes.length > 0,
+                    noteCount: relatedNotes.length
+                };
+            });
+
+            const withNotes = conceptNodes.filter(c => c.hasNotes).length;
+            console.log(`✨ Returning ${conceptNodes.length} concepts (${withNotes} with notes, ${conceptNodes.length - withNotes} pure latent)`);
+
+            return conceptNodes;
+
+        } catch (error) {
+            console.error('Error in embedding-based concept extraction:', error);
+            new Notice(`Failed to extract concepts: ${error.message}`);
+            return [];
         }
     }
 
