@@ -507,22 +507,33 @@ export class SemanticMonadView extends ItemView {
         let failed = 0;
 
         try {
-            // Initialize embedding service first (connects to local server)
-            this.statusDiv.setText('Connecting to embedding server...');
-            new Notice('Connecting to local embedding server (localhost:8765)...', 4000);
+            // Determine which embedding source to use
+            const useConceptExplorer = this.conceptExplorer && this.plugin.settings.embeddingSource !== 'minilm';
 
-            try {
-                await this.embeddingService.initialize();
-                const modelInfo = this.embeddingService.getModelInfo();
-                this.statusDiv.setText(`Connected to ${modelInfo.name}! Starting to index...`);
-                new Notice(`Embedding server ready! Using ${modelInfo.name}`, 3000);
-            } catch (error) {
-                const msg = `❌ Failed to connect to embedding server: ${error.message}`;
-                this.statusDiv.setText(msg);
-                this.statusDiv.style.color = 'var(--text-error)';
-                new Notice('❌ Cannot connect to embedding server. Please ensure the Rust server is running on localhost:8765', 15000);
-                console.error('Embedding service initialization failed:', error);
-                throw new Error('Embedding server unavailable: ' + error.message);
+            if (useConceptExplorer) {
+                // Use ConceptExplorer's embedding source (Ollama/OpenAI)
+                const embeddingSourceName = this.plugin.settings.embeddingSource;
+                this.statusDiv.setText(`Using ${embeddingSourceName} embeddings for indexing...`);
+                new Notice(`Indexing with ${embeddingSourceName}...`, 3000);
+                console.log(`🔧 Vault indexing will use ${embeddingSourceName} embeddings`);
+            } else {
+                // Use legacy MiniLM embedding service
+                this.statusDiv.setText('Connecting to embedding server...');
+                new Notice('Connecting to local embedding server (localhost:8765)...', 4000);
+
+                try {
+                    await this.embeddingService.initialize();
+                    const modelInfo = this.embeddingService.getModelInfo();
+                    this.statusDiv.setText(`Connected to ${modelInfo.name}! Starting to index...`);
+                    new Notice(`Embedding server ready! Using ${modelInfo.name}`, 3000);
+                } catch (error) {
+                    const msg = `❌ Failed to connect to embedding server: ${error.message}`;
+                    this.statusDiv.setText(msg);
+                    this.statusDiv.style.color = 'var(--text-error)';
+                    new Notice('❌ Cannot connect to embedding server. Please ensure the Rust server is running on localhost:8765', 15000);
+                    console.error('Embedding service initialization failed:', error);
+                    throw new Error('Embedding server unavailable: ' + error.message);
+                }
             }
 
             const files = this.app.vault.getMarkdownFiles();
@@ -608,8 +619,16 @@ export class SemanticMonadView extends ItemView {
         const needsReindex = await this.vectorIndex.needsReindex(file.path, file.stat.mtime);
         if (!needsReindex) return;
 
-        // Generate embedding
-        const embedding = await this.embeddingService.embed(content);
+        // Generate embedding using configured source
+        let embedding: number[];
+        if (this.conceptExplorer && this.plugin.settings.embeddingSource !== 'minilm') {
+            // Use ConceptExplorer's embedding source (respects Ollama/OpenAI settings)
+            const embeddingSource = this.conceptExplorer.getEmbeddingSource();
+            embedding = await embeddingSource.embed(content);
+        } else {
+            // Use legacy MiniLM service
+            embedding = await this.embeddingService.embed(content);
+        }
 
         // Debug: Log first indexed note to verify embeddings are diverse
         const stats = await this.vectorIndex.getStats();

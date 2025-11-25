@@ -48,6 +48,13 @@ export class ConceptExplorer {
     }
 
     /**
+     * Get the current embedding source (for external use like vault indexing)
+     */
+    getEmbeddingSource(): EmbeddingSource {
+        return this.embeddingSource;
+    }
+
+    /**
      * Explore concepts similar to query
      * This is the core K1 monad operation
      */
