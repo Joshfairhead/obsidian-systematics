@@ -310,7 +310,9 @@ export class SemanticMonadView extends ItemView {
         modeToggle.value = this.useEmbeddingMode ? 'embedding' : 'llm';
         modeToggle.addEventListener('change', (e) => {
             this.useEmbeddingMode = (e.target as HTMLSelectElement).value === 'embedding';
-            console.log(`Switched to ${this.useEmbeddingMode ? 'embedding-based' : 'LLM'} mode`);
+            const modeName = this.useEmbeddingMode ? 'Embedding-based' : 'LLM Generation';
+            console.log(`🔄 Switched to ${modeName} mode`);
+            new Notice(`Mode: ${modeName}. Search again to apply.`, 3000);
         });
 
         // Filter controls (only shown in embedding mode)
@@ -652,7 +654,8 @@ export class SemanticMonadView extends ItemView {
         this.selectedConcepts = [];
 
         try {
-            new Notice('Searching semantic space...');
+            const modeIndicator = this.useEmbeddingMode ? '🔍 Embedding-based' : '🤖 LLM';
+            new Notice(`${modeIndicator}: Searching semantic space...`);
 
             // Normalize query (lowercase for matching)
             const queryNormalized = query.toLowerCase();
