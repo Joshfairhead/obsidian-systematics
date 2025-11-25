@@ -657,6 +657,18 @@ export class SemanticMonadView extends ItemView {
             // Normalize query (lowercase for matching)
             const queryNormalized = query.toLowerCase();
 
+            // Check if vault is indexed first
+            const allIndexed = await this.vectorIndex.getAllRecords();
+            const totalIndexed = allIndexed.length;
+            console.log(`📊 Vault index status: ${totalIndexed} notes indexed`);
+
+            if (totalIndexed === 0) {
+                new Notice('⚠️ Vault not indexed! Click "Index Vault" button first to enable search.', 8000);
+                this.statusDiv.style.color = 'var(--text-error)';
+                this.statusDiv.textContent = '⚠️ No notes indexed - click "Index Vault" to begin';
+                return;
+            }
+
             // Ensure server is connected
             if (!this.embeddingService.isReady()) {
                 await this.embeddingService.initialize();
@@ -673,14 +685,14 @@ export class SemanticMonadView extends ItemView {
 
             // Find nearest notes with hybrid scoring (semantic + metadata)
             const nearestNotes = await this.vectorIndex.findNearest(queryEmbedding, 50, queryNormalized);
-            console.log('Nearest notes found:', {
+            console.log('📚 Nearest notes found:', {
                 count: nearestNotes.length,
-                topScores: nearestNotes.slice(0, 5).map(n => ({ path: n.path, score: n.score })),
+                topScores: nearestNotes.slice(0, 5).map(n => ({ path: n.path, score: n.score.toFixed(3) })),
                 scoreDiversity: new Set(nearestNotes.slice(0, 10).map(n => n.score.toFixed(3))).size
             });
 
             if (nearestNotes.length === 0) {
-                new Notice('No indexed notes found. Please index your vault first.');
+                new Notice('No related notes found. Try indexing more notes or using a different query.');
                 return;
             }
 
@@ -777,29 +789,58 @@ export class SemanticMonadView extends ItemView {
                 console.log(`🔍 Concept filter: ${filteredConcepts.length}/${conceptsWithScores.length} concepts`);
             }
 
-            // STEP 3: Check which concepts have notes in vault
+            // STEP 3: Find semantically related notes for each concept using embeddings
             const allRecords = await this.vectorIndex.getAllRecords();
-            const conceptNodes: ConceptNode[] = filteredConcepts.map(concept => {
-                // Check if any notes relate to this concept
-                const relatedNotes = allRecords.filter(record => {
-                    const title = record.metadata.title.toLowerCase();
-                    const path = record.id.toLowerCase();
-                    const term = concept.term.toLowerCase();
+            console.log(`📚 Vault has ${allRecords.length} indexed notes`);
 
-                    return title.includes(term) || path.includes(term);
-                });
+            if (allRecords.length === 0) {
+                console.warn('⚠️ No notes indexed! Please index your vault first.');
+                new Notice('No notes indexed. Click "Index Vault" button first.', 5000);
+                // Return concepts without note counts
+                return filteredConcepts.map(concept => ({
+                    term: concept.term,
+                    embedding: concept.embedding!,
+                    similarity: concept.score,
+                    hasNotes: false,
+                    noteCount: 0
+                }));
+            }
 
-                return {
+            const conceptNodes: ConceptNode[] = [];
+
+            for (const concept of filteredConcepts) {
+                // Use concept's embedding to find semantically similar notes
+                const similarNotes = allRecords.map(record => {
+                    // Calculate similarity between concept embedding and note embedding
+                    const similarity = EmbeddingService.cosineSimilarity(
+                        concept.embedding!,
+                        record.embedding
+                    );
+                    return { record, similarity };
+                })
+                .sort((a, b) => b.similarity - a.similarity)
+                .slice(0, 5); // Top 5 related notes per concept
+
+                // Consider notes "related" if similarity > 0.3 (lower threshold for broader matching)
+                const relatedNotes = similarNotes.filter(n => n.similarity > 0.3);
+
+                // Debug: log top matches for first few concepts
+                if (conceptNodes.length < 3 && relatedNotes.length > 0) {
+                    console.log(`  📄 "${concept.term}" related notes:`,
+                        relatedNotes.slice(0, 3).map(n => `${n.record.metadata.title} (${(n.similarity * 100).toFixed(0)}%)`));
+                }
+
+                conceptNodes.push({
                     term: concept.term,
                     embedding: concept.embedding!,
                     similarity: concept.score,
                     hasNotes: relatedNotes.length > 0,
                     noteCount: relatedNotes.length
-                };
-            });
+                });
+            }
 
             const withNotes = conceptNodes.filter(c => c.hasNotes).length;
-            console.log(`✨ Returning ${conceptNodes.length} concepts (${withNotes} with notes, ${conceptNodes.length - withNotes} pure latent)`);
+            console.log(`✨ Returning ${conceptNodes.length} concepts (${withNotes} with semantically related notes, ${conceptNodes.length - withNotes} pure latent)`);
 
             return conceptNodes;
 
