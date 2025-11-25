@@ -770,9 +770,15 @@ export class SemanticMonadView extends ItemView {
         try {
             // STEP 1: Explore latent space with ConceptExplorer
             const count = this.plugin.settings.conceptCount;
-            console.log(`🌐 Querying ConceptExplorer for ${count} concepts...`);
+            const vocabSource = this.plugin.settings.vocabularySource;
+            console.log(`🌐 Querying ConceptExplorer for ${count} concepts using ${vocabSource} vocabulary...`);
             const conceptsWithScores = await this.conceptExplorer.explore(query, count);
             console.log(`✅ ConceptExplorer returned ${conceptsWithScores.length} concepts`);
+
+            // Log vocabulary source for user awareness
+            if (vocabSource === 'systematics') {
+                console.log(`ℹ️ Using Bennett K1-K12 (philosophical/ontological terms only). For broader results, try "Vault" vocabulary in settings.`);
+            }
 
             // STEP 2: Apply basic filter
             let filteredConcepts = conceptsWithScores;
@@ -842,8 +848,12 @@ export class SemanticMonadView extends ItemView {
                 });
             }
 
+            // Ensure concepts are sorted by similarity (should already be, but enforce)
+            conceptNodes.sort((a, b) => b.similarity - a.similarity);
+
             const withNotes = conceptNodes.filter(c => c.hasNotes).length;
             console.log(`✨ Returning ${conceptNodes.length} concepts (${withNotes} with semantically related notes, ${conceptNodes.length - withNotes} pure latent)`);
+            console.log(`📊 Top 10 ranked for "${query}":`, conceptNodes.slice(0, 10).map(c => `${c.term} (${(c.similarity * 100).toFixed(0)}%)`).join(', '));
 
             return conceptNodes;
 
