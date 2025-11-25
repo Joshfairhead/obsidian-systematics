@@ -200,7 +200,7 @@ export class SemanticMonadView extends ItemView {
 
         titleRow.createEl('h2', { text: 'Latent Space Explorer' });
         const versionEl = titleRow.createEl('span', {
-            text: 'v0.8.0',
+            text: 'v0.8.1',
             cls: 'version-badge'
         });
         versionEl.style.fontSize = '11px';
@@ -229,6 +229,28 @@ export class SemanticMonadView extends ItemView {
         });
         debugButton.style.backgroundColor = 'var(--background-modifier-border)';
         debugButton.addEventListener('click', () => this.debugIndex());
+
+        // Clear Index button to wipe all embeddings
+        const clearButton = controlsSection.createEl('button', {
+            text: 'Clear Index',
+            cls: 'index-vault-button'
+        });
+        clearButton.style.backgroundColor = 'var(--interactive-accent)';
+        clearButton.style.color = 'var(--text-on-accent)';
+        clearButton.addEventListener('click', async () => {
+            const confirmed = confirm('⚠️ Clear ALL embeddings from database?\n\nThis will remove all indexed note embeddings. You will need to re-index your vault.\n\nThis is necessary when switching between embedding sources (e.g., MiniLM → Ollama) to avoid dimension mismatches.');
+            if (confirmed) {
+                try {
+                    new Notice('🗑️ Clearing embedding index...');
+                    await this.vectorIndex.clear();
+                    new Notice('✅ Index cleared! Re-index your vault to rebuild embeddings.', 5000);
+                    await this.updateIndexStatus();
+                } catch (error) {
+                    console.error('Error clearing index:', error);
+                    new Notice('❌ Error clearing index: ' + error.message, 5000);
+                }
+            }
+        });
 
         // Breadcrumb trail
         this.breadcrumbTrail = container.createDiv('breadcrumb-trail');
